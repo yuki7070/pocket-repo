@@ -120,6 +120,7 @@ export type FileContent = {
   content: string | null;
   binary: boolean;
   tooLarge: boolean;
+  isMarp: boolean;
 };
 
 export async function listDirectory(repositoryPath: string, relativePath: string) {
@@ -192,7 +193,8 @@ export async function readRepositoryFile(
     size: stats.size,
     content: null,
     binary: false,
-    tooLarge: stats.size > TEXT_FILE_LIMIT
+    tooLarge: stats.size > TEXT_FILE_LIMIT,
+    isMarp: false
   };
 
   if (result.tooLarge) {
@@ -208,10 +210,19 @@ export async function readRepositoryFile(
     };
   }
 
+  const content = buffer.toString("utf8");
+
   return {
     ...result,
-    content: buffer.toString("utf8")
+    content,
+    isMarp: result.language === "markdown" && hasMarpFrontmatter(content)
   };
+}
+
+// A Marp deck is Markdown with `marp: true` in its leading YAML frontmatter.
+function hasMarpFrontmatter(content: string) {
+  const match = content.match(/^﻿?\s*---\r?\n([\s\S]*?)\r?\n---/);
+  return match ? /^\s*marp\s*:\s*true\s*$/m.test(match[1]) : false;
 }
 
 export function resolveRepositoryPath(
