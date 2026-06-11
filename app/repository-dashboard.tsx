@@ -1179,6 +1179,10 @@ function RepositoryView({
     return buildPathUrl("render-marp", filePath);
   }
 
+  function buildOfficeUrl(filePath: string) {
+    return buildPathUrl("render-office", filePath);
+  }
+
   function handleOpenFromTab(entryPath: string) {
     if (entryPath.endsWith("/")) {
       onNavigateDirectory(entryPath.replace(/\/+$/, ""));
@@ -1383,6 +1387,7 @@ function RepositoryView({
                     buildRawUrl={buildRawUrl}
                     buildRenderUrl={buildRenderUrl}
                     buildMarpUrl={buildMarpUrl}
+                    buildOfficeUrl={buildOfficeUrl}
                     onOpenFile={onOpenFilePath}
                   />
                 ) : null}
@@ -1978,6 +1983,13 @@ function isImagePath(name: string) {
   return extension ? IMAGE_EXTENSIONS.includes(extension) : false;
 }
 
+const PRESENTATION_EXTENSIONS = ["pptx", "ppt", "ppsx", "odp"];
+
+function isPresentationPath(name: string) {
+  const extension = name.split(".").pop()?.toLowerCase();
+  return extension ? PRESENTATION_EXTENSIONS.includes(extension) : false;
+}
+
 function isExternalUrl(url: string) {
   return /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith("//");
 }
@@ -2225,17 +2237,111 @@ function MarpPreview({
   );
 }
 
+// Preview a presentation by rendering the server-converted PDF in an iframe.
+// Checks the `office` capability first so we can show install guidance when
+// LibreOffice is not available, rather than a broken frame.
+function OfficePreview({
+  file,
+  pdfUrl
+}: {
+  file: FileContent;
+  pdfUrl: string;
+}) {
+  const [office, setOffice] = useState<boolean | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/capabilities")
+      .then((response) => response.json())
+      .then((data) => {
+        if (mounted) {
+          setOffice(Boolean(data?.office));
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setOffice(false);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (office === null) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="animate-spin" size={16} />
+        Checking preview support…
+      </div>
+    );
+  }
+
+  if (!office) {
+    return (
+      <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/30 p-4 text-sm">
+        <p className="font-medium">Presentation preview needs LibreOffice</p>
+        <p className="text-muted-foreground">
+          Install LibreOffice to render{" "}
+          <span className="font-mono">.pptx</span> /{" "}
+          <span className="font-mono">.ppt</span> files as a PDF preview, then
+          reopen this file.
+        </p>
+        <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">
+          <code>sudo apt install libreoffice-impress</code>
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">
+          Rendered to PDF via LibreOffice
+        </span>
+        <a
+          href={pdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          <ExternalLink size={14} />
+          Open in new tab
+        </a>
+      </div>
+      <div className="relative min-h-24">
+        {!loaded ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="animate-spin" size={16} />
+            Converting…
+          </div>
+        ) : null}
+        <iframe
+          src={pdfUrl}
+          title={file.name}
+          onLoad={() => setLoaded(true)}
+          className="h-[75vh] w-full rounded-md border border-border bg-white"
+        />
+      </div>
+    </div>
+  );
+}
+
 function FilePreview({
   file,
   buildRawUrl,
   buildRenderUrl,
   buildMarpUrl,
+  buildOfficeUrl,
   onOpenFile
 }: {
   file: FileContent;
   buildRawUrl: (filePath: string) => string;
   buildRenderUrl: (filePath: string) => string;
   buildMarpUrl: (filePath: string) => string;
+  buildOfficeUrl: (filePath: string) => string;
   onOpenFile: (filePath: string) => void;
 }) {
   if (isImagePath(file.name)) {
@@ -2249,6 +2355,12 @@ function FilePreview({
         />
       </div>
     );
+  }
+
+  // Presentations are binary, so handle them before the binary/too-large
+  // fallbacks: they are previewed by converting to PDF on the server.
+  if (isPresentationPath(file.name)) {
+    return <OfficePreview file={file} pdfUrl={buildOfficeUrl(file.path)} />;
   }
 
   if (file.tooLarge) {

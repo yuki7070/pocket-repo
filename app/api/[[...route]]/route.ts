@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { Hono } from "hono";
 import { handle } from "hono/vercel";
 import {
@@ -26,9 +27,16 @@ import {
   listDirectory,
   readRepositoryFile,
   readRepositoryImage,
-  readRepositoryRaw
+  readRepositoryRaw,
+  resolveRepositoryPath
 } from "@/lib/repository-files";
 import { renderMarpDeck } from "@/lib/marp";
+import {
+  convertPresentationToPdf,
+  isOfficeAvailable,
+  isPresentationPath,
+  OfficeUnavailableError
+} from "@/lib/office";
 
 export const runtime = "nodejs";
 
@@ -677,6 +685,89 @@ app.get("/render-marp/:repositoryId/:filePath{.+}", async (c) => {
           code: message.includes("outside")
             ? "PATH_OUTSIDE_REPOSITORY"
             : "FILE_NOT_FOUND",
+          message
+        }
+      },
+      400
+    );
+  }
+});
+
+// Report optional capabilities so the client can adapt its UI — currently
+// whether LibreOffice is available for Office/presentation previews.
+app.get("/capabilities", async (c) => {
+  return c.json({ office: await isOfficeAvailable() });
+});
+
+// Preview a presentation (.pptx/.ppt/.odp) by converting it to PDF with
+// LibreOffice and serving the PDF inline. The conversion result is cached and
+// the original file is never modified (read-only is preserved). Requires
+// LibreOffice to be installed; otherwise responds 503.
+app.get("/render-office/:repositoryId/:filePath{.+}", async (c) => {
+  const repository = await getRecentRepository(c.req.param("repositoryId"));
+
+  if (!repository) {
+    return c.json(
+      {
+        error: {
+          code: "REPOSITORY_NOT_FOUND",
+          message: "Repository not found."
+        }
+      },
+      404
+    );
+  }
+
+  try {
+    const relativePath = c.req.param("filePath");
+
+    if (!isPresentationPath(relativePath)) {
+      throw new Error("Unsupported file type for slide preview.");
+    }
+
+    const effectivePath = await resolveWorktreePath(
+      repository,
+      c.req.query("worktree")
+    );
+    const absolutePath = resolveRepositoryPath(effectivePath, relativePath);
+    const pdfPath = await convertPresentationToPdf(absolutePath);
+    const buffer = await readFile(pdfPath);
+    const body = buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength
+    ) as ArrayBuffer;
+
+    return c.body(body, 200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="${path
+        .basename(relativePath, path.extname(relativePath))
+        .replace(/["\\\r\n]/g, "")}.pdf"`,
+      "Cache-Control": "private, max-age=60",
+      "X-Content-Type-Options": "nosniff"
+    });
+  } catch (error) {
+    if (error instanceof OfficeUnavailableError) {
+      return c.json(
+        {
+          error: {
+            code: "OFFICE_TOOL_MISSING",
+            message:
+              "LibreOffice is required to preview presentations. Install it (e.g. `sudo apt install libreoffice-impress`)."
+          }
+        },
+        503
+      );
+    }
+
+    const message =
+      error instanceof Error ? error.message : "Failed to render presentation.";
+
+    return c.json(
+      {
+        error: {
+          code: message.includes("outside")
+            ? "PATH_OUTSIDE_REPOSITORY"
+            : "PRESENTATION_RENDER_FAILED",
           message
         }
       },
