@@ -29,6 +29,12 @@ npx pocket-repo
   iframe by default, with a Preview/Code toggle for the source and a button to
   open the rendered page in a new tab. Relative assets (CSS, JS, fonts, images)
   resolve against the repository.
+- **Marp slides** — Markdown decks (`marp: true`) render as slides, with a
+  fullscreen slideshow and a Slides/Markdown/Code toggle.
+- **Presentation preview** *(optional)* — `.pptx` / `.ppt` / `.odp` files are
+  previewed as PDF when [LibreOffice](https://www.libreoffice.org/) is
+  installed (e.g. `sudo apt install libreoffice-impress`). Conversions are
+  cached; the original file is never modified.
 - **Status & branch diff** — see uncommitted working-tree changes, or compare
   the current branch against another branch (e.g. `develop`) to list the files
   that differ.
