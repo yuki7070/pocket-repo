@@ -1,0 +1,271 @@
+import { spawn } from "node:child_process";
+import { lstat, readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+
+const TEXT_FILE_LIMIT = 1024 * 1024;
+const RAW_FILE_LIMIT = 25 * 1024 * 1024;
+
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
+  ".bmp": "image/bmp"
+};
+
+export function imageContentType(filePath: string) {
+  return IMAGE_CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? null;
+}
+
+export async function readRepositoryImage(
+  repositoryPath: string,
+  relativePath: string
+) {
+  const absolutePath = resolveRepositoryPath(repositoryPath, relativePath);
+  const contentType = imageContentType(relativePath);
+
+  if (!contentType) {
+    throw new Error("Unsupported file type for raw access.");
+  }
+
+  const stats = await lstat(absolutePath);
+
+  if (!stats.isFile()) {
+    throw new Error("Path is not a file.");
+  }
+
+  if (stats.size > RAW_FILE_LIMIT) {
+    throw new Error("File is too large to display.");
+  }
+
+  const buffer = await readFile(absolutePath);
+
+  return { buffer, contentType, size: stats.size };
+}
+
+export type FileEntry = {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size: number | null;
+  lastModifiedAt: string;
+};
+
+export type FileContent = {
+  path: string;
+  name: string;
+  language: string;
+  size: number;
+  content: string | null;
+  binary: boolean;
+  tooLarge: boolean;
+};
+
+export async function listDirectory(repositoryPath: string, relativePath: string) {
+  const absolutePath = resolveRepositoryPath(repositoryPath, relativePath);
+  const stats = await lstat(absolutePath);
+
+  if (!stats.isDirectory()) {
+    throw new Error("Path is not a directory.");
+  }
+
+  const entries = await readdir(absolutePath, { withFileTypes: true });
+  const candidateEntries = entries.filter((entry) => entry.name !== ".git");
+  const ignoredPaths = await listIgnoredPaths(
+    repositoryPath,
+    candidateEntries.map((entry) =>
+      normalizeRelativePath(path.posix.join(toPosixPath(relativePath), entry.name))
+    )
+  );
+  const visibleEntries = candidateEntries.filter((entry) => {
+    const entryRelativePath = normalizeRelativePath(
+      path.posix.join(toPosixPath(relativePath), entry.name)
+    );
+
+    return !ignoredPaths.has(entryRelativePath);
+  });
+  const fileEntries = await Promise.all(
+    visibleEntries
+      .map(async (entry) => {
+        const entryRelativePath = normalizeRelativePath(
+          path.posix.join(toPosixPath(relativePath), entry.name)
+        );
+        const entryAbsolutePath = path.join(absolutePath, entry.name);
+        const entryStats = await lstat(entryAbsolutePath);
+
+        return {
+          name: entry.name,
+          path: entryRelativePath,
+          type: entry.isDirectory() ? "directory" : "file",
+          size: entry.isDirectory() ? null : entryStats.size,
+          lastModifiedAt: entryStats.mtime.toISOString()
+        } satisfies FileEntry;
+      })
+  );
+
+  return fileEntries.sort((a, b) => {
+    if (a.type !== b.type) {
+      return a.type === "directory" ? -1 : 1;
+    }
+
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export async function readRepositoryFile(
+  repositoryPath: string,
+  relativePath: string
+) {
+  const absolutePath = resolveRepositoryPath(repositoryPath, relativePath);
+  const stats = await lstat(absolutePath);
+
+  if (!stats.isFile()) {
+    throw new Error("Path is not a file.");
+  }
+
+  const filePath = normalizeRelativePath(relativePath);
+  const result: FileContent = {
+    path: filePath,
+    name: path.basename(filePath),
+    language: detectLanguage(filePath),
+    size: stats.size,
+    content: null,
+    binary: false,
+    tooLarge: stats.size > TEXT_FILE_LIMIT
+  };
+
+  if (result.tooLarge) {
+    return result;
+  }
+
+  const buffer = await readFile(absolutePath);
+
+  if (isBinary(buffer)) {
+    return {
+      ...result,
+      binary: true
+    };
+  }
+
+  return {
+    ...result,
+    content: buffer.toString("utf8")
+  };
+}
+
+export function resolveRepositoryPath(
+  repositoryPath: string,
+  relativePath: string
+) {
+  const normalizedRepositoryPath = path.resolve(repositoryPath);
+  const normalizedRelativePath = normalizeRelativePath(relativePath);
+  const absolutePath = path.resolve(
+    normalizedRepositoryPath,
+    normalizedRelativePath
+  );
+  const relativeFromRoot = path.relative(normalizedRepositoryPath, absolutePath);
+
+  if (
+    relativeFromRoot.startsWith("..") ||
+    path.isAbsolute(relativeFromRoot)
+  ) {
+    throw new Error("Path is outside repository.");
+  }
+
+  return absolutePath;
+}
+
+function normalizeRelativePath(relativePath: string) {
+  const withoutBackslashes = relativePath.replaceAll("\\", "/");
+  const normalized = path.posix.normalize(withoutBackslashes);
+
+  if (normalized === "." || normalized === "/") {
+    return "";
+  }
+
+  return normalized.replace(/^\/+/, "");
+}
+
+function toPosixPath(relativePath: string) {
+  return normalizeRelativePath(relativePath);
+}
+
+function isBinary(buffer: Buffer) {
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8000));
+
+  return sample.includes(0);
+}
+
+function detectLanguage(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  const name = path.basename(filePath).toLowerCase();
+
+  if (name === "dockerfile") {
+    return "dockerfile";
+  }
+
+  const languages: Record<string, string> = {
+    ".css": "css",
+    ".html": "html",
+    ".js": "javascript",
+    ".json": "json",
+    ".jsx": "javascript",
+    ".md": "markdown",
+    ".mdx": "markdown",
+    ".mjs": "javascript",
+    ".py": "python",
+    ".sh": "shell",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".yaml": "yaml",
+    ".yml": "yaml"
+  };
+
+  return languages[extension] ?? "text";
+}
+
+async function listIgnoredPaths(repositoryPath: string, relativePaths: string[]) {
+  if (relativePaths.length === 0) {
+    return new Set<string>();
+  }
+
+  return new Promise<Set<string>>((resolve, reject) => {
+    const child = spawn("git", ["check-ignore", "-z", "--stdin"], {
+      cwd: repositoryPath,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0 && code !== 1) {
+        reject(
+          new Error(
+            Buffer.concat(stderr).toString("utf8") ||
+              `git check-ignore failed with exit code ${code}`
+          )
+        );
+        return;
+      }
+
+      resolve(
+        new Set(
+          Buffer.concat(stdout)
+            .toString("utf8")
+            .split("\0")
+            .map((value) => value.trim())
+            .filter(Boolean)
+        )
+      );
+    });
+
+    child.stdin.end(relativePaths.join("\0"));
+  });
+}
