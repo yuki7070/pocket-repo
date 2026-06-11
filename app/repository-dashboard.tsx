@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -143,6 +144,7 @@ export function RepositoryDashboard() {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [selectedFile, setSelectedFile] = useState<FileContent | null>(null);
+  const [readmeFile, setReadmeFile] = useState<FileContent | null>(null);
   const [isFilesLoading, setIsFilesLoading] = useState(false);
   const [fileErrorMessage, setFileErrorMessage] = useState<string | null>(null);
   const [directoryListing, setDirectoryListing] =
@@ -435,6 +437,46 @@ export function RepositoryDashboard() {
     };
   }, [selectedRepository, selectedFilePath, worktreeParam]);
 
+  // GitHub-style: when browsing a directory, render its README below the file
+  // list. Only fetch when not viewing a file and a Markdown README is present.
+  useEffect(() => {
+    const readmeEntry = selectedFilePath ? null : findReadmeEntry(entries);
+
+    if (!selectedRepository || !readmeEntry) {
+      setReadmeFile(null);
+      return;
+    }
+
+    let mounted = true;
+
+    async function loadReadme() {
+      try {
+        const searchParams = new URLSearchParams({ path: readmeEntry!.path });
+        if (worktreeParam) {
+          searchParams.set("worktree", worktreeParam);
+        }
+        const response = await fetch(
+          `/api/repositories/${selectedRepository?.id}/file?${searchParams}`
+        );
+        const data = (await response.json()) as { file?: FileContent };
+
+        if (mounted) {
+          setReadmeFile(response.ok && data.file ? data.file : null);
+        }
+      } catch {
+        if (mounted) {
+          setReadmeFile(null);
+        }
+      }
+    }
+
+    loadReadme();
+
+    return () => {
+      mounted = false;
+    };
+  }, [selectedRepository, selectedFilePath, worktreeParam, entries]);
+
   async function loadDirectoryListing(path?: string) {
     setIsDirectoryLoading(true);
     setDirectoryErrorMessage(null);
@@ -680,6 +722,7 @@ export function RepositoryDashboard() {
             isFilesLoading={isFilesLoading}
             selectedFile={selectedFile}
             selectedFilePath={selectedFilePath}
+            readmeFile={readmeFile}
             selectedRepository={selectedRepository}
             selectedWorktreePath={selectedWorktreePath}
             summary={summary}
@@ -1068,6 +1111,7 @@ function RepositoryView({
   isFilesLoading,
   selectedFile,
   selectedFilePath,
+  readmeFile,
   selectedRepository,
   selectedWorktreePath,
   summary,
@@ -1087,6 +1131,7 @@ function RepositoryView({
   isFilesLoading: boolean;
   selectedFile: FileContent | null;
   selectedFilePath: string;
+  readmeFile: FileContent | null;
   selectedRepository: RecentRepository | null;
   selectedWorktreePath: string;
   summary: RepositorySummary | null;
@@ -1334,6 +1379,7 @@ function RepositoryView({
               </div>
             </Card>
           ) : (
+            <div className="flex flex-col gap-4">
             <Card className="overflow-hidden py-0">
               <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground">
                 <span>Name</span>
@@ -1386,6 +1432,23 @@ function RepositoryView({
                 </div>
               )}
             </Card>
+            {readmeFile?.content ? (
+              <Card className="overflow-hidden py-0">
+                <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2.5 text-sm font-medium">
+                  <BookOpen size={16} className="text-muted-foreground" />
+                  <span className="truncate">{readmeFile.name}</span>
+                </div>
+                <div className="p-4">
+                  <MarkdownView
+                    content={readmeFile.content}
+                    baseDir={currentPath}
+                    buildRawUrl={buildRawUrl}
+                    onOpenFile={onOpenFilePath}
+                  />
+                </div>
+              </Card>
+            ) : null}
+            </div>
           )}
         </div>
         ) : activeTab === "Status" ? (
@@ -1889,6 +1952,17 @@ const IMAGE_EXTENSIONS = [
   "bmp"
 ];
 
+// Pick the README to render under a directory listing, preferring a Markdown
+// one. Mirrors GitHub's case-insensitive matching.
+function findReadmeEntry(entries: FileEntry[]) {
+  return (
+    entries.find(
+      (entry) =>
+        entry.type === "file" && /^readme\.(md|markdown|mdx)$/i.test(entry.name)
+    ) ?? null
+  );
+}
+
 function isImagePath(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
   return extension ? IMAGE_EXTENSIONS.includes(extension) : false;
@@ -1923,6 +1997,81 @@ function resolveRepoRelativePath(baseDir: string, target: string) {
   }
 
   return segments.join("/");
+}
+
+// Render Markdown with GitHub-flavored extensions and embedded raw HTML
+// (rehype-raw) so README tables/<img> render like on GitHub. Relative image
+// sources and links are resolved against `baseDir` and rewritten to the /raw
+// endpoint or to in-app navigation.
+function MarkdownView({
+  content,
+  baseDir,
+  buildRawUrl,
+  onOpenFile
+}: {
+  content: string;
+  baseDir: string;
+  buildRawUrl: (filePath: string) => string;
+  onOpenFile: (filePath: string) => void;
+}) {
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw]}
+        components={{
+          img: ({ src, alt }) => {
+            const source = typeof src === "string" ? src : "";
+            const resolved = resolveRepoRelativePath(baseDir, source);
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={resolved ? buildRawUrl(resolved) : source}
+                alt={alt ?? ""}
+                loading="lazy"
+              />
+            );
+          },
+          a: ({ href, children }) => {
+            if (!href) {
+              return <span>{children}</span>;
+            }
+
+            if (href.startsWith("#")) {
+              return <a href={href}>{children}</a>;
+            }
+
+            if (isExternalUrl(href)) {
+              return (
+                <a href={href} target="_blank" rel="noopener noreferrer">
+                  {children}
+                </a>
+              );
+            }
+
+            const [pathPart] = href.split("#");
+            const resolved = resolveRepoRelativePath(baseDir, pathPart);
+
+            if (!resolved) {
+              return <a href={href}>{children}</a>;
+            }
+
+            return (
+              <button
+                type="button"
+                onClick={() => onOpenFile(resolved)}
+                className="text-primary underline underline-offset-4"
+              >
+                {children}
+              </button>
+            );
+          }
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 function HtmlPreview({
@@ -2035,61 +2184,12 @@ function FilePreview({
       : "";
 
     return (
-      <div className="markdown-body">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            img: ({ src, alt }) => {
-              const source = typeof src === "string" ? src : "";
-              const resolved = resolveRepoRelativePath(baseDir, source);
-              return (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={resolved ? buildRawUrl(resolved) : source}
-                  alt={alt ?? ""}
-                  loading="lazy"
-                />
-              );
-            },
-            a: ({ href, children }) => {
-              if (!href) {
-                return <span>{children}</span>;
-              }
-
-              if (href.startsWith("#")) {
-                return <a href={href}>{children}</a>;
-              }
-
-              if (isExternalUrl(href)) {
-                return (
-                  <a href={href} target="_blank" rel="noopener noreferrer">
-                    {children}
-                  </a>
-                );
-              }
-
-              const [pathPart] = href.split("#");
-              const resolved = resolveRepoRelativePath(baseDir, pathPart);
-
-              if (!resolved) {
-                return <a href={href}>{children}</a>;
-              }
-
-              return (
-                <button
-                  type="button"
-                  onClick={() => onOpenFile(resolved)}
-                  className="text-primary underline underline-offset-4"
-                >
-                  {children}
-                </button>
-              );
-            }
-          }}
-        >
-          {file.content}
-        </ReactMarkdown>
-      </div>
+      <MarkdownView
+        content={file.content}
+        baseDir={baseDir}
+        buildRawUrl={buildRawUrl}
+        onOpenFile={onOpenFile}
+      />
     );
   }
 
