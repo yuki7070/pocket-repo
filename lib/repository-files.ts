@@ -21,6 +21,63 @@ export function imageContentType(filePath: string) {
   return IMAGE_CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? null;
 }
 
+// Content types for files served by the HTML render endpoint: the document
+// itself plus the sibling assets it commonly references (styles, scripts,
+// fonts). Anything unknown falls back to a generic binary type.
+const RENDER_CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".xml": "application/xml; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".eot": "application/vnd.ms-fontobject"
+};
+
+export function renderContentType(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  return (
+    RENDER_CONTENT_TYPES[extension] ?? IMAGE_CONTENT_TYPES[extension] ?? null
+  );
+}
+
+export function isHtmlPath(filePath: string) {
+  return /\.html?$/i.test(filePath);
+}
+
+// Serve a file's raw bytes for the HTML render endpoint. Used both for the
+// HTML document and for the relative assets (css/js/images/fonts) it loads.
+export async function readRepositoryRaw(
+  repositoryPath: string,
+  relativePath: string
+) {
+  const absolutePath = resolveRepositoryPath(repositoryPath, relativePath);
+  const contentType =
+    renderContentType(relativePath) ?? "application/octet-stream";
+
+  const stats = await lstat(absolutePath);
+
+  if (!stats.isFile()) {
+    throw new Error("Path is not a file.");
+  }
+
+  if (stats.size > RAW_FILE_LIMIT) {
+    throw new Error("File is too large to display.");
+  }
+
+  const buffer = await readFile(absolutePath);
+
+  return { buffer, contentType, size: stats.size };
+}
+
 export async function readRepositoryImage(
   repositoryPath: string,
   relativePath: string
