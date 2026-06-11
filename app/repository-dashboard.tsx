@@ -2205,6 +2205,7 @@ function MarpPreview({
         <iframe
           src={slidesUrl}
           title={file.name}
+          allow="fullscreen"
           sandbox="allow-scripts allow-popups allow-forms allow-modals allow-downloads"
           className="h-[70vh] w-full rounded-md border border-border bg-[#1a1a1a]"
         />
