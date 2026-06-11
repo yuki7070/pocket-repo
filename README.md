@@ -1,11 +1,23 @@
 # Pocket Repo
 
+[![npm version](https://img.shields.io/npm/v/pocket-repo.svg)](https://www.npmjs.com/package/pocket-repo)
+[![CI](https://github.com/yuki7070/pocket-repo/actions/workflows/ci.yml/badge.svg)](https://github.com/yuki7070/pocket-repo/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A local, **read-only** Git repository viewer built for mobile browsers. Run it
 on your machine and browse your repositories — files, diffs, branches,
 worktrees, and running coding-agent sessions — from your phone or any browser
 on the same network.
 
 Pocket Repo never edits files or mutates Git state. It only reads.
+
+```bash
+npx pocket-repo
+```
+
+| File browser | HTML preview |
+| :---: | :---: |
+| <img src="docs/assets/file-browser.png" alt="Browsing a repository's files" width="320"> | <img src="docs/assets/html-preview.png" alt="Rendered HTML preview in a sandboxed iframe" width="320"> |
 
 ## Features
 

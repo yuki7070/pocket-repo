@@ -9,3 +9,6 @@ coverage
 !.env.example
 *.log
 .codex-*
+
+# Playwright CLI screenshot/snapshot artifacts
+.playwright-cli
