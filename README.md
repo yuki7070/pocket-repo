@@ -13,6 +13,10 @@ Pocket Repo never edits files or mutates Git state. It only reads.
   a file switches to a dedicated file view with a breadcrumb path.
 - **Image & Markdown rendering** — images render inline, Markdown renders with
   embedded images and working relative links.
+- **HTML preview** — HTML files open as a rendered preview in a sandboxed
+  iframe by default, with a Preview/Code toggle for the source and a button to
+  open the rendered page in a new tab. Relative assets (CSS, JS, fonts, images)
+  resolve against the repository.
 - **Status & branch diff** — see uncommitted working-tree changes, or compare
   the current branch against another branch (e.g. `develop`) to list the files
   that differ.
@@ -31,31 +35,51 @@ Pocket Repo never edits files or mutates Git state. It only reads.
 - [Hono](https://hono.dev/) for the API routes
 - `react-markdown` + `remark-gfm` for Markdown rendering
 
-## Getting started
+## Quick start
 
-Requirements: Node.js 20+ and [pnpm](https://pnpm.io/).
+Requirements: Node.js 20+. No install or clone needed — run it directly with
+[`npx`](https://docs.npmjs.com/cli/commands/npx):
+
+```bash
+npx pocket-repo
+```
+
+This starts the server on `0.0.0.0:4545`. Open `http://<your-machine-ip>:4545`
+from your phone or any device on the same network, then point Pocket Repo at a
+local Git repository to start browsing.
+
+### Options
+
+```bash
+npx pocket-repo --port 8080       # listen on a different port (default: 4545)
+npx pocket-repo --host 127.0.0.1  # bind to a specific host (default: 0.0.0.0)
+npx pocket-repo --help
+```
+
+| Option              | Default   | Description            |
+| ------------------- | --------- | ---------------------- |
+| `-p`, `--port`      | `4545`    | Port to listen on      |
+| `-H`, `--host`      | `0.0.0.0` | Host to bind to        |
+| `-h`, `--help`      | —         | Show usage             |
+
+> Tip: binding to `0.0.0.0` (the default) makes the server reachable from other
+> devices on your network. Find your machine's IP with `ipconfig getifaddr en0`
+> (macOS) or `hostname -I` (Linux).
+
+## Run from source
+
+To hack on Pocket Repo, clone the repo and use [pnpm](https://pnpm.io/):
 
 ```bash
 pnpm install
 
 # Development
-pnpm dev
+pnpm dev                                  # dev server on http://localhost:3000
 
 # Production
 pnpm build
-pnpm start
+pnpm exec next start -H 0.0.0.0 -p 4545   # serve on your network
 ```
-
-By default the server listens on the standard Next.js port (`3000`). To expose it
-on your network — for example to open it from a phone — bind to all interfaces
-and pick a port:
-
-```bash
-pnpm exec next start -H 0.0.0.0 -p 4545
-```
-
-Then open `http://<your-machine-ip>:4545` from another device on the same
-network.
 
 ### Scripts
 

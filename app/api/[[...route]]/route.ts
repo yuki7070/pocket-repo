@@ -22,9 +22,11 @@ import type { RecentRepository } from "@/lib/config-store";
 import { listAgentSessions } from "@/lib/agents";
 import { listHomeDirectories } from "@/lib/home-directories";
 import {
+  isHtmlPath,
   listDirectory,
   readRepositoryFile,
-  readRepositoryImage
+  readRepositoryImage,
+  readRepositoryRaw
 } from "@/lib/repository-files";
 
 export const runtime = "nodejs";
@@ -542,6 +544,71 @@ app.get("/repositories/:repositoryId/raw", async (c) => {
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; sandbox"
     });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to read file.";
+
+    return c.json(
+      {
+        error: {
+          code: message.includes("outside")
+            ? "PATH_OUTSIDE_REPOSITORY"
+            : "FILE_NOT_FOUND",
+          message
+        }
+      },
+      400
+    );
+  }
+});
+
+// Render an HTML file (and its sibling assets) in the browser. Uses a
+// path-style route so relative URLs inside the HTML (./style.css, img/foo.png)
+// resolve naturally to /render/<id>/<dir>/<asset>. The HTML document is served
+// with a sandbox CSP so it runs in an opaque origin: scripts execute but the
+// page cannot reach Pocket Repo's same-origin API, cookies, or storage.
+app.get("/render/:repositoryId/:filePath{.+}", async (c) => {
+  const repository = await getRecentRepository(c.req.param("repositoryId"));
+
+  if (!repository) {
+    return c.json(
+      {
+        error: {
+          code: "REPOSITORY_NOT_FOUND",
+          message: "Repository not found."
+        }
+      },
+      404
+    );
+  }
+
+  try {
+    const relativePath = c.req.param("filePath");
+    const effectivePath = await resolveWorktreePath(
+      repository,
+      c.req.query("worktree")
+    );
+    const { buffer, contentType } = await readRepositoryRaw(
+      effectivePath,
+      relativePath
+    );
+    const body = buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength
+    ) as ArrayBuffer;
+
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff"
+    };
+
+    if (isHtmlPath(relativePath)) {
+      headers["Content-Security-Policy"] =
+        "sandbox allow-scripts allow-popups allow-forms allow-modals allow-downloads";
+    }
+
+    return c.body(body, 200, headers);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to read file.";

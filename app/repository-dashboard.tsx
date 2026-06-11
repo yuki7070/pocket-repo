@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Code2,
+  ExternalLink,
   File,
   Folder,
   GitBranch,
@@ -23,7 +24,7 @@ import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -1113,6 +1114,17 @@ function RepositoryView({
     return `/api/repositories/${repositoryId}/raw?${params}`;
   }
 
+  function buildRenderUrl(filePath: string) {
+    const encodedPath = filePath
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    const suffix = worktreeParam
+      ? `?${new URLSearchParams({ worktree: worktreeParam })}`
+      : "";
+    return `/api/render/${repositoryId}/${encodedPath}${suffix}`;
+  }
+
   function handleOpenFromTab(entryPath: string) {
     if (entryPath.endsWith("/")) {
       onNavigateDirectory(entryPath.replace(/\/+$/, ""));
@@ -1315,6 +1327,7 @@ function RepositoryView({
                   <FilePreview
                     file={selectedFile}
                     buildRawUrl={buildRawUrl}
+                    buildRenderUrl={buildRenderUrl}
                     onOpenFile={onOpenFilePath}
                   />
                 ) : null}
@@ -1912,13 +1925,79 @@ function resolveRepoRelativePath(baseDir: string, target: string) {
   return segments.join("/");
 }
 
+function HtmlPreview({
+  file,
+  renderUrl
+}: {
+  file: FileContent;
+  renderUrl: string;
+}) {
+  const [view, setView] = useState<"preview" | "code">("preview");
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+          <button
+            type="button"
+            onClick={() => setView("preview")}
+            className={cn(
+              "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+              view === "preview"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("code")}
+            className={cn(
+              "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+              view === "code"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Code
+          </button>
+        </div>
+        <a
+          href={renderUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          <ExternalLink size={14} />
+          Open in new tab
+        </a>
+      </div>
+      {view === "preview" ? (
+        <iframe
+          src={renderUrl}
+          title={file.name}
+          sandbox="allow-scripts allow-popups allow-forms allow-modals allow-downloads"
+          className="h-[70vh] w-full rounded-md border border-border bg-white"
+        />
+      ) : (
+        <pre className="overflow-x-auto rounded-md bg-muted p-4 text-xs leading-relaxed">
+          <code>{file.content ?? ""}</code>
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function FilePreview({
   file,
   buildRawUrl,
+  buildRenderUrl,
   onOpenFile
 }: {
   file: FileContent;
   buildRawUrl: (filePath: string) => string;
+  buildRenderUrl: (filePath: string) => string;
   onOpenFile: (filePath: string) => void;
 }) {
   if (isImagePath(file.name)) {
@@ -2012,6 +2091,10 @@ function FilePreview({
         </ReactMarkdown>
       </div>
     );
+  }
+
+  if (file.language === "html") {
+    return <HtmlPreview file={file} renderUrl={buildRenderUrl(file.path)} />;
   }
 
   return (
