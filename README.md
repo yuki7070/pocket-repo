@@ -81,4 +81,4 @@ access are required.
 
 ## License
 
-Private project. All rights reserved unless stated otherwise.
+Released under the [MIT License](LICENSE).
