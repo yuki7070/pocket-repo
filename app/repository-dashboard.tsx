@@ -102,6 +102,7 @@ type FileContent = {
   content: string | null;
   binary: boolean;
   tooLarge: boolean;
+  isMarp: boolean;
 };
 
 type DirectoryEntry = {
@@ -1159,7 +1160,7 @@ function RepositoryView({
     return `/api/repositories/${repositoryId}/raw?${params}`;
   }
 
-  function buildRenderUrl(filePath: string) {
+  function buildPathUrl(base: string, filePath: string) {
     const encodedPath = filePath
       .split("/")
       .map((segment) => encodeURIComponent(segment))
@@ -1167,7 +1168,15 @@ function RepositoryView({
     const suffix = worktreeParam
       ? `?${new URLSearchParams({ worktree: worktreeParam })}`
       : "";
-    return `/api/render/${repositoryId}/${encodedPath}${suffix}`;
+    return `/api/${base}/${repositoryId}/${encodedPath}${suffix}`;
+  }
+
+  function buildRenderUrl(filePath: string) {
+    return buildPathUrl("render", filePath);
+  }
+
+  function buildMarpUrl(filePath: string) {
+    return buildPathUrl("render-marp", filePath);
   }
 
   function handleOpenFromTab(entryPath: string) {
@@ -1373,6 +1382,7 @@ function RepositoryView({
                     file={selectedFile}
                     buildRawUrl={buildRawUrl}
                     buildRenderUrl={buildRenderUrl}
+                    buildMarpUrl={buildMarpUrl}
                     onOpenFile={onOpenFilePath}
                   />
                 ) : null}
@@ -2138,15 +2148,93 @@ function HtmlPreview({
   );
 }
 
+// Preview a Marp deck. Defaults to the rendered slides (sandboxed iframe), with
+// toggles to read it as Markdown or view the raw source, plus a new-tab link.
+function MarpPreview({
+  file,
+  slidesUrl,
+  buildRawUrl,
+  onOpenFile
+}: {
+  file: FileContent;
+  slidesUrl: string;
+  buildRawUrl: (filePath: string) => string;
+  onOpenFile: (filePath: string) => void;
+}) {
+  const [view, setView] = useState<"slides" | "markdown" | "code">("slides");
+  const baseDir = file.path.includes("/")
+    ? file.path.slice(0, file.path.lastIndexOf("/"))
+    : "";
+  const tabs: Array<{ key: typeof view; label: string }> = [
+    { key: "slides", label: "Slides" },
+    { key: "markdown", label: "Markdown" },
+    { key: "code", label: "Code" }
+  ];
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setView(tab.key)}
+              className={cn(
+                "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                view === tab.key
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <a
+          href={slidesUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          <ExternalLink size={14} />
+          Open in new tab
+        </a>
+      </div>
+      {view === "slides" ? (
+        <iframe
+          src={slidesUrl}
+          title={file.name}
+          sandbox="allow-scripts allow-popups allow-forms allow-modals allow-downloads"
+          className="h-[70vh] w-full rounded-md border border-border bg-[#1a1a1a]"
+        />
+      ) : view === "markdown" ? (
+        <MarkdownView
+          content={file.content ?? ""}
+          baseDir={baseDir}
+          buildRawUrl={buildRawUrl}
+          onOpenFile={onOpenFile}
+        />
+      ) : (
+        <pre className="overflow-x-auto rounded-md bg-muted p-4 text-xs leading-relaxed">
+          <code>{file.content ?? ""}</code>
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function FilePreview({
   file,
   buildRawUrl,
   buildRenderUrl,
+  buildMarpUrl,
   onOpenFile
 }: {
   file: FileContent;
   buildRawUrl: (filePath: string) => string;
   buildRenderUrl: (filePath: string) => string;
+  buildMarpUrl: (filePath: string) => string;
   onOpenFile: (filePath: string) => void;
 }) {
   if (isImagePath(file.name)) {
@@ -2175,6 +2263,17 @@ function FilePreview({
       <p className="text-sm text-muted-foreground">
         Binary files are not previewed.
       </p>
+    );
+  }
+
+  if (file.isMarp && file.content) {
+    return (
+      <MarpPreview
+        file={file}
+        slidesUrl={buildMarpUrl(file.path)}
+        buildRawUrl={buildRawUrl}
+        onOpenFile={onOpenFile}
+      />
     );
   }
 

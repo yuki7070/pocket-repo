@@ -28,6 +28,7 @@ import {
   readRepositoryImage,
   readRepositoryRaw
 } from "@/lib/repository-files";
+import { renderMarpDeck } from "@/lib/marp";
 
 export const runtime = "nodejs";
 
@@ -612,6 +613,63 @@ app.get("/render/:repositoryId/:filePath{.+}", async (c) => {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to read file.";
+
+    return c.json(
+      {
+        error: {
+          code: message.includes("outside")
+            ? "PATH_OUTSIDE_REPOSITORY"
+            : "FILE_NOT_FOUND",
+          message
+        }
+      },
+      400
+    );
+  }
+});
+
+// Render a Marp Markdown deck to slides. Reads the Markdown, renders it to a
+// self-contained HTML document, and serves it with the same sandbox CSP as the
+// HTML render endpoint so it can be shown in an iframe or a new tab.
+app.get("/render-marp/:repositoryId/:filePath{.+}", async (c) => {
+  const repository = await getRecentRepository(c.req.param("repositoryId"));
+
+  if (!repository) {
+    return c.json(
+      {
+        error: {
+          code: "REPOSITORY_NOT_FOUND",
+          message: "Repository not found."
+        }
+      },
+      404
+    );
+  }
+
+  try {
+    const relativePath = c.req.param("filePath");
+    const effectivePath = await resolveWorktreePath(
+      repository,
+      c.req.query("worktree")
+    );
+    const file = await readRepositoryFile(effectivePath, relativePath);
+
+    if (file.tooLarge || file.binary || file.content == null) {
+      throw new Error("File cannot be rendered as slides.");
+    }
+
+    const deck = renderMarpDeck(file.content, file.name);
+
+    return c.body(deck, 200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy":
+        "sandbox allow-scripts allow-popups allow-forms allow-modals allow-downloads"
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to render slides.";
 
     return c.json(
       {
