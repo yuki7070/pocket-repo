@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Local read-only Git repository viewer for mobile browsers — files, diffs, worktrees, and agent sessions.",
   "type": "module",
+  "packageManager": "pnpm@11.1.1",
   "bin": {
     "pocket-repo": "bin/pocket-repo.mjs"
   },
