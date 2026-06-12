@@ -21,7 +21,8 @@ import {
   MoreVertical,
   Search,
   Settings,
-  Smartphone
+  Smartphone,
+  Trash2
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -646,6 +647,19 @@ export function RepositoryDashboard() {
     openRepositoryPath(cwd);
   }
 
+  function handleRemoveRepository(repository: RecentRepository) {
+    setRepositories((current) =>
+      current.filter((entry) => entry.id !== repository.id)
+    );
+    if (selectedRepositoryId === repository.id) {
+      setSelectedRepositoryId(null);
+      setCurrentPath("");
+      setSelectedFilePath("");
+      setSelectedFile(null);
+    }
+    void fetch(`/api/repositories/${repository.id}`, { method: "DELETE" });
+  }
+
   const sidebar = (
     <SidebarContent
       isAgentsActive={view === "agents"}
@@ -658,6 +672,7 @@ export function RepositoryDashboard() {
       }}
       onOpenPicker={() => setIsRepositoryPickerOpen(true)}
       onSelectRepository={handleSelectRepository}
+      onRemoveRepository={handleRemoveRepository}
     />
   );
 
@@ -761,7 +776,8 @@ function SidebarContent({
   selectedRepository,
   onOpenAgents,
   onOpenPicker,
-  onSelectRepository
+  onSelectRepository,
+  onRemoveRepository
 }: {
   isAgentsActive: boolean;
   isLoading: boolean;
@@ -770,6 +786,7 @@ function SidebarContent({
   onOpenAgents: () => void;
   onOpenPicker: () => void;
   onSelectRepository: (repository: RecentRepository) => void;
+  onRemoveRepository: (repository: RecentRepository) => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -817,6 +834,7 @@ function SidebarContent({
             repositories={repositories}
             selectedRepository={selectedRepository}
             onSelectRepository={onSelectRepository}
+            onRemoveRepository={onRemoveRepository}
           />
         )}
       </ScrollArea>
@@ -874,14 +892,43 @@ function entrySubLabel(entry: RecentRepository) {
   return entry.worktreeRelative ?? entry.path;
 }
 
+function RecentItemMenu({
+  onRemove
+}: {
+  onRemove: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label="Recent item actions"
+        onClick={(event) => event.stopPropagation()}
+        className="inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-sidebar-accent aria-expanded:text-foreground"
+      >
+        <MoreVertical size={16} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem
+          onClick={onRemove}
+          className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+        >
+          <Trash2 size={14} />
+          Remove from recent
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function RecentRepositoryGroups({
   repositories,
   selectedRepository,
-  onSelectRepository
+  onSelectRepository,
+  onRemoveRepository
 }: {
   repositories: RecentRepository[];
   selectedRepository: RecentRepository | null;
   onSelectRepository: (repository: RecentRepository) => void;
+  onRemoveRepository: (repository: RecentRepository) => void;
 }) {
   const groups = groupRepositoriesByRepo(repositories);
   // Collapsed by default: track which groups the user has explicitly expanded.
@@ -951,30 +998,40 @@ function RecentRepositoryGroups({
                 </span>
               </button>
               {hasWorktrees ? (
-                <span className="mr-2 shrink-0 rounded-full bg-sidebar-accent px-1.5 text-xs text-muted-foreground">
+                <span className="shrink-0 rounded-full bg-sidebar-accent px-1.5 text-xs text-muted-foreground">
                   {group.entries.length}
                 </span>
               ) : null}
+              <RecentItemMenu onRemove={() => onRemoveRepository(primary)} />
             </div>
 
             {hasWorktrees && isExpanded ? (
               <div className="ml-3 flex flex-col gap-0.5 border-l border-border pl-2">
                 {group.entries.map((entry) => (
-                  <button
+                  <div
                     key={entry.id}
-                    type="button"
-                    onClick={() => onSelectRepository(entry)}
                     className={cn(
-                      "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent",
+                      "flex items-center rounded-md transition-colors hover:bg-sidebar-accent",
                       entry.id === selectedRepository?.id &&
                         "bg-sidebar-accent text-sidebar-accent-foreground"
                     )}
                   >
-                    <span className="truncate text-sm">{entryLabel(entry)}</span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {entrySubLabel(entry)}
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => onSelectRepository(entry)}
+                      className="flex min-w-0 flex-1 flex-col gap-0.5 px-2 py-1.5 text-left"
+                    >
+                      <span className="truncate text-sm">
+                        {entryLabel(entry)}
+                      </span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {entrySubLabel(entry)}
+                      </span>
+                    </button>
+                    <RecentItemMenu
+                      onRemove={() => onRemoveRepository(entry)}
+                    />
+                  </div>
                 ))}
               </div>
             ) : null}

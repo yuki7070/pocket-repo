@@ -8,6 +8,7 @@ import {
   getPocketRepoHome,
   listRecentRepositories,
   openRepository,
+  removeRecentRepository,
   touchRepository
 } from "@/lib/config-store";
 import {
@@ -196,6 +197,25 @@ app.post("/repositories/:repositoryId/touch", async (c) => {
   const updated = await touchRepository(c.req.param("repositoryId"));
 
   if (!updated) {
+    return c.json(
+      {
+        error: {
+          code: "REPOSITORY_NOT_FOUND",
+          message: "Repository not found."
+        }
+      },
+      404
+    );
+  }
+
+  return c.json({ ok: true });
+});
+
+// Forget a repository from the recent list (does not touch the project on disk).
+app.delete("/repositories/:repositoryId", async (c) => {
+  const removed = await removeRecentRepository(c.req.param("repositoryId"));
+
+  if (!removed) {
     return c.json(
       {
         error: {
