@@ -271,6 +271,41 @@ function extractConnectUrl(rawLog: string): string | null {
   return session ? `${session[0]}?from=cli` : null;
 }
 
+// The per-session claude.ai ids a server has handled, in creation order,
+// filtered to those still active (appearing in the recent log tail — the status
+// line redraws the live sessions continuously, so stale/ended ones drop off).
+function activeSessionIds(log: string): string[] {
+  const linkRe = /\/code\/(session_[A-Za-z0-9]+)\?from=cli/g;
+
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const match of log.matchAll(linkRe)) {
+    if (!seen.has(match[1])) {
+      seen.add(match[1]);
+      order.push(match[1]);
+    }
+  }
+
+  const tail = log.slice(-4000);
+  const active = new Set(
+    Array.from(tail.matchAll(linkRe), (match) => match[1])
+  );
+  return order.filter((id) => active.has(id));
+}
+
+// For each running server, the active session ids it owns (creation order).
+// Used to map same-dir sessions — which don't record their own id — to a
+// claude.ai link by position (oldest local session ↔ oldest active id).
+export async function listRemoteControlSessionIds() {
+  const alive = (await readRegistry()).filter((server) => isPidAlive(server.pid));
+  return Promise.all(
+    alive.map(async (server) => ({
+      cwd: server.cwd,
+      sessionIds: activeSessionIds(await tailLog(server.logFile, 1_000_000))
+    }))
+  );
+}
+
 export async function listRemoteControls() {
   const servers = await readRegistry();
   const alive = servers.filter((server) => isPidAlive(server.pid));
