@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot,
+  ChevronDown,
+  ChevronRight,
   Folder,
   GitBranch,
   Loader2,
@@ -16,6 +18,13 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -342,6 +351,8 @@ function RemoteControlPanel({
 }) {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [servers, setServers] = useState<RemoteControlServer[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [spawnMode, setSpawnMode] = useState("same-dir");
   const [capacity, setCapacity] = useState(4);
   const [permissionMode, setPermissionMode] = useState("auto");
@@ -411,6 +422,7 @@ function RemoteControlPanel({
         throw new Error(data?.error?.message ?? "Failed to start.");
       }
       setName("");
+      setDialogOpen(false);
       await loadServers();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to start.");
@@ -424,96 +436,147 @@ function RemoteControlPanel({
     await loadServers();
   }
 
+  function toggleLog(id: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
   return (
-    <Card className="overflow-hidden py-0">
-      <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground">
-        <Radio size={14} />
-        <span>Remote control (claude.ai/code · Claude app)</span>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Radio size={15} className="text-muted-foreground" />
+          Remote control
+        </div>
+        <Button
+          size="sm"
+          disabled={available === false || !repositoryId}
+          onClick={() => {
+            setError(null);
+            setDialogOpen(true);
+          }}
+        >
+          <Radio size={14} />
+          New server
+        </Button>
       </div>
 
       {available === false ? (
-        <div className="p-4 text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Requires the <span className="font-mono">claude</span> CLI (Claude
           Code) on PATH, signed in with a subscription.
-        </div>
+        </p>
+      ) : repoServers.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No remote-control servers running for this repository. Use{" "}
+          <span className="font-medium text-foreground">New server</span> to
+          control sessions from claude.ai/code or the Claude app.
+        </p>
       ) : (
-        <div className="flex flex-col gap-3 p-4">
-          {repoServers.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {repoServers.map((server) => (
-                <div
-                  key={server.id}
-                  className="rounded-md border border-border bg-muted/30 p-3"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-block size-2 shrink-0 rounded-full bg-green-500" />
-                        <span className="truncate text-sm font-medium">
-                          {server.name}
-                        </span>
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        <Badge variant="secondary">{server.spawn}</Badge>
-                        <Badge variant="secondary">
-                          cap {server.capacity}
-                        </Badge>
-                        <Badge variant="secondary">{server.permissionMode}</Badge>
-                      </div>
+        <div className="divide-y divide-border rounded-md border border-border">
+          {repoServers.map((server) => {
+            const isOpen = expanded.has(server.id);
+            return (
+              <div key={server.id} className="flex flex-col">
+                <div className="flex items-center gap-2 px-3 py-2.5">
+                  <span className="size-2 shrink-0 rounded-full bg-green-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">
+                      {server.name}
                     </div>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => stop(server.id)}
-                    >
-                      <Square size={14} />
-                      Stop
-                    </Button>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {server.spawn} · cap {server.capacity} ·{" "}
+                      {server.permissionMode}
+                    </div>
                   </div>
                   {server.log ? (
-                    <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
-                      {server.log.trim()}
-                    </pre>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toggleLog(server.id)}
+                    >
+                      {isOpen ? (
+                        <ChevronDown size={14} />
+                      ) : (
+                        <ChevronRight size={14} />
+                      )}
+                      Output
+                    </Button>
                   ) : null}
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => stop(server.id)}
+                  >
+                    <Square size={14} />
+                    Stop
+                  </Button>
                 </div>
-              ))}
-            </div>
-          ) : null}
+                {isOpen && server.log ? (
+                  <pre className="max-h-56 overflow-auto border-t border-border bg-muted/30 px-3 py-2 text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                    {server.log.trim()}
+                  </pre>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New remote-control server</DialogTitle>
+            <DialogDescription>
+              Launches <span className="font-mono">claude remote-control</span>{" "}
+              in {repositoryName}. Sessions it spawns can edit files and run
+              commands.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Spawn
+                <Select
+                  value={spawnMode}
+                  onValueChange={(value) => value && setSpawnMode(value)}
+                >
+                  <SelectTrigger size="sm" aria-label="Spawn mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SPAWN_MODES.map((mode) => (
+                      <SelectItem key={mode} value={mode}>
+                        {mode}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Capacity
+                <Input
+                  type="number"
+                  min={1}
+                  max={64}
+                  value={capacity}
+                  onChange={(event) =>
+                    setCapacity(Number(event.target.value) || 1)
+                  }
+                  className="h-8"
+                />
+              </label>
+            </div>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Spawn
-              <Select
-                value={spawnMode}
-                onValueChange={(value) => value && setSpawnMode(value)}
-              >
-                <SelectTrigger size="sm" aria-label="Spawn mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SPAWN_MODES.map((mode) => (
-                    <SelectItem key={mode} value={mode}>
-                      {mode}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Capacity
-              <Input
-                type="number"
-                min={1}
-                max={64}
-                value={capacity}
-                onChange={(event) =>
-                  setCapacity(Number(event.target.value) || 1)
-                }
-                className="h-8"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Permission
+              Permission mode
               <Select
                 value={permissionMode}
                 onValueChange={(value) => value && setPermissionMode(value)}
@@ -530,35 +593,37 @@ function RemoteControlPanel({
                 </SelectContent>
               </Select>
             </label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              Name
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={defaultName}
+                className="h-8"
+              />
+            </label>
+
+            {error ? (
+              <p className="text-sm text-destructive">{error}</p>
+            ) : null}
+
+            <div className="mt-1 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button disabled={starting || !repositoryId} onClick={start}>
+                {starting ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Radio size={14} />
+                )}
+                Start
+              </Button>
+            </div>
           </div>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Name
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={defaultName}
-              className="h-8"
-            />
-          </label>
-
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-          <Button
-            size="sm"
-            className="self-start"
-            disabled={starting || !repositoryId}
-            onClick={start}
-          >
-            {starting ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Radio size={14} />
-            )}
-            Start remote control
-          </Button>
-        </div>
-      )}
-    </Card>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
