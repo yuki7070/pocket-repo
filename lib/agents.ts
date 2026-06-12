@@ -4,6 +4,7 @@ import { open, readdir, readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { listRemoteControls } from "./remote-control";
 
 const execFileAsync = promisify(execFile);
 
@@ -55,12 +56,54 @@ export async function listAgentSessions() {
     }
   }
 
+  await linkRemoteControlSessions(sessions);
+
   return sessions.sort((a, b) => {
     if (a.running !== b.running) {
       return a.running ? -1 : 1;
     }
     return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
   });
+}
+
+// Sessions spawned by a `claude remote-control` server (entrypoint "sdk-cli")
+// don't record their own claude.ai session id, so the per-session link from
+// `bridgeSessionId` is missing. Fall back to the environment URL of the server
+// covering the session's directory — opening it reaches the session on
+// claude.ai/code. Only Claude sessions, and only when no direct link exists.
+async function linkRemoteControlSessions(sessions: AgentSession[]) {
+  if (!sessions.some((session) => !session.url && session.tool === "claude")) {
+    return;
+  }
+
+  let servers;
+  try {
+    servers = await listRemoteControls();
+  } catch {
+    return;
+  }
+
+  // Longest cwd first so the most specific (deepest) server wins a match.
+  const covering = servers
+    .filter((server) => server.url)
+    .sort((a, b) => b.cwd.length - a.cwd.length);
+  if (covering.length === 0) {
+    return;
+  }
+
+  for (const session of sessions) {
+    if (session.url || session.tool !== "claude" || !session.cwd) {
+      continue;
+    }
+    const server = covering.find(
+      (candidate) =>
+        session.cwd === candidate.cwd ||
+        session.cwd.startsWith(`${candidate.cwd}/.claude/worktrees/`)
+    );
+    if (server?.url) {
+      session.url = server.url;
+    }
+  }
 }
 
 function isPidAlive(pid: number | null) {
