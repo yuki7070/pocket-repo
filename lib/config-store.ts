@@ -99,6 +99,22 @@ export async function touchRepository(repositoryId: string) {
   return repository;
 }
 
+// Remove a repository from the recent list. The on-disk project is untouched;
+// this only forgets the entry.
+export async function removeRecentRepository(repositoryId: string) {
+  await ensurePocketRepoHome();
+  const data = await readRecentRepositoriesFile();
+  const next = data.repositories.filter((entry) => entry.id !== repositoryId);
+
+  if (next.length === data.repositories.length) {
+    return false;
+  }
+
+  data.repositories = next;
+  await writeRecentRepositoriesFile(data);
+  return true;
+}
+
 export async function openRepository(inputPath: string) {
   await ensurePocketRepoHome();
 
