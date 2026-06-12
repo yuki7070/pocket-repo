@@ -97,6 +97,29 @@ or desktop (its own window, app icon, no browser chrome).
   then use "Add to Home Screen". The app itself works fine over plain HTTP; only
   the install prompt needs HTTPS.
 
+### Run as a service (systemd --user)
+
+To keep Pocket Repo running in the background on Linux, install it globally and
+use the bundled [`docs/pocket-repo.service`](docs/pocket-repo.service) template:
+
+```bash
+npm install -g pocket-repo
+mkdir -p ~/.config/systemd/user
+cp docs/pocket-repo.service ~/.config/systemd/user/pocket-repo.service
+# edit ExecStart in the file to match your Node/pocket-repo paths
+#   (find them with: command -v node ; command -v pocket-repo)
+systemctl --user daemon-reload
+systemctl --user enable --now pocket-repo
+```
+
+Useful commands:
+
+```bash
+systemctl --user status pocket-repo     # check it's running
+journalctl --user -u pocket-repo -f     # follow the logs
+loginctl enable-linger "$USER"          # optional: keep running while logged out
+```
+
 ## Run from source
 
 To hack on Pocket Repo, clone the repo and use [pnpm](https://pnpm.io/):

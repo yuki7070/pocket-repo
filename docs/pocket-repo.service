@@ -1,0 +1,38 @@
+# Pocket Repo — systemd --user service template.
+#
+# Install:
+#   npm install -g pocket-repo
+#   mkdir -p ~/.config/systemd/user
+#   cp docs/pocket-repo.service ~/.config/systemd/user/pocket-repo.service
+#   # edit ExecStart below to match your install (see comments), then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now pocket-repo
+#
+# Keep it running while logged out (optional):
+#   loginctl enable-linger "$USER"
+
+[Unit]
+Description=Pocket Repo — local read-only Git repository viewer
+Documentation=https://github.com/yuki7070/pocket-repo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Set ExecStart to your install. Find the paths with:
+#   command -v node          # the Node binary
+#   command -v pocket-repo   # the global CLI (after `npm install -g pocket-repo`)
+#
+# nvm-managed Node — paths are version-specific; update them when you upgrade
+# Node (and re-run `npm install -g pocket-repo`). %h expands to your home dir:
+ExecStart=%h/.nvm/versions/node/v22.0.0/bin/node %h/.nvm/versions/node/v22.0.0/bin/pocket-repo --port 4545 --host 0.0.0.0
+#
+# System-wide Node on PATH (Debian/Ubuntu, Homebrew, …) — use this instead and
+# delete the line above:
+#   ExecStart=/usr/bin/pocket-repo --port 4545 --host 0.0.0.0
+Environment=NODE_ENV=production
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
