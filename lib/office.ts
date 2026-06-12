@@ -19,9 +19,11 @@ import { getPocketRepoHome } from "./config-store";
 // documents alike.
 const PRESENTATION_EXTENSIONS = new Set([".pptx", ".ppt", ".ppsx", ".odp"]);
 const DOCUMENT_EXTENSIONS = new Set([".docx", ".doc", ".odt", ".rtf"]);
+const SPREADSHEET_EXTENSIONS = new Set([".xlsx", ".xls", ".ods"]);
 const CONVERTIBLE_EXTENSIONS = new Set([
   ...PRESENTATION_EXTENSIONS,
-  ...DOCUMENT_EXTENSIONS
+  ...DOCUMENT_EXTENSIONS,
+  ...SPREADSHEET_EXTENSIONS
 ]);
 
 // Refuse to convert absurdly large inputs.

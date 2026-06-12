@@ -2151,14 +2151,19 @@ function isImagePath(name: string) {
 
 const PRESENTATION_EXTENSIONS = ["pptx", "ppt", "ppsx", "odp"];
 const DOCUMENT_EXTENSIONS = ["docx", "doc", "odt", "rtf"];
+const SPREADSHEET_EXTENSIONS = ["xlsx", "xls", "ods"];
+const CONVERTIBLE_DOCUMENT_EXTENSIONS = [
+  ...PRESENTATION_EXTENSIONS,
+  ...DOCUMENT_EXTENSIONS,
+  ...SPREADSHEET_EXTENSIONS
+];
 
 // Office documents that need a server-side LibreOffice conversion before they
 // can be previewed as a PDF.
 function isConvertibleDocumentPath(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
   return extension
-    ? PRESENTATION_EXTENSIONS.includes(extension) ||
-        DOCUMENT_EXTENSIONS.includes(extension)
+    ? CONVERTIBLE_DOCUMENT_EXTENSIONS.includes(extension)
     : false;
 }
 
@@ -2589,9 +2594,10 @@ function DocumentPreview({
         {needsLibreOffice ? (
           <>
             <p className="text-muted-foreground">
-              Word documents (<span className="font-mono">.docx</span> /{" "}
-              <span className="font-mono">.doc</span>) need the LibreOffice
-              Writer component; presentations need Impress.
+              Each file type needs its LibreOffice component: Writer for
+              documents (<span className="font-mono">.docx</span>), Impress for
+              presentations (<span className="font-mono">.pptx</span>), and Calc
+              for spreadsheets (<span className="font-mono">.xlsx</span>).
             </p>
             <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">
               <code>sudo apt install libreoffice</code>
