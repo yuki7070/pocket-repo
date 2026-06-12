@@ -524,7 +524,10 @@ app.get("/repositories/:repositoryId/files", async (c) => {
       repository,
       c.req.query("worktree")
     );
-    const entries = await listDirectory(effectivePath, relativePath);
+    const includeIgnored = c.req.query("hidden") === "1";
+    const entries = await listDirectory(effectivePath, relativePath, {
+      includeIgnored
+    });
 
     return c.json({
       path: relativePath,
