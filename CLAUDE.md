@@ -10,6 +10,8 @@ Hard invariant: **never edit files or mutate Git state.** Everything is reads vi
 
 **The one documented exception** is the Agents tab's "remote control" action (`lib/remote-control.ts`), which launches a `claude remote-control` server that can spawn write-capable Claude Code sessions. The viewer itself still never writes; this is an explicit, opt-in "launch an agent server" capability, clearly separated from the read-only browsing. Do not add other write paths without the same explicit treatment.
 
+As part of that launch, `ensureWorkspaceTrusted(cwd)` writes one config file — `~/.claude.json` (honoring `CLAUDE_CONFIG_DIR`) — to set `projects[cwd].hasTrustDialogAccepted = true`, otherwise `claude remote-control` refuses to start with "Workspace not trusted". This is a careful read-modify-write that bails if the config is unparseable. It is the only place outside the remote-control launch that touches a file on disk; keep it scoped to that path.
+
 ## Commands
 
 ```bash
