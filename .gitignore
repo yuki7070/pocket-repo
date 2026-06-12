@@ -12,3 +12,6 @@ coverage
 
 # Playwright CLI screenshot/snapshot artifacts
 .playwright-cli
+
+# Claude Code local settings and agent worktrees
+.claude
