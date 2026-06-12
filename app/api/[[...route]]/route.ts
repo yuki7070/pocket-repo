@@ -38,6 +38,17 @@ import {
   isPresentationPath,
   OfficeUnavailableError
 } from "@/lib/office";
+import {
+  ClaudeUnavailableError,
+  isClaudeAvailable,
+  listRemoteControls,
+  startRemoteControl,
+  stopRemoteControl,
+  PERMISSION_MODES,
+  SPAWN_MODES,
+  type PermissionMode,
+  type SpawnMode
+} from "@/lib/remote-control";
 
 export const runtime = "nodejs";
 
@@ -716,7 +727,102 @@ app.get("/render-marp/:repositoryId/:filePath{.+}", async (c) => {
 // Report optional capabilities so the client can adapt its UI — currently
 // whether LibreOffice is available for Office/presentation previews.
 app.get("/capabilities", async (c) => {
-  return c.json({ office: await isOfficeAvailable() });
+  const [office, remoteControl] = await Promise.all([
+    isOfficeAvailable(),
+    isClaudeAvailable()
+  ]);
+  return c.json({ office, remoteControl });
+});
+
+// List running `claude remote-control` servers Pocket Repo has launched.
+app.get("/remote-control", async (c) => {
+  return c.json({ servers: await listRemoteControls() });
+});
+
+// Stop a remote-control server.
+app.delete("/remote-control/:id", async (c) => {
+  const stopped = await stopRemoteControl(c.req.param("id"));
+  if (!stopped) {
+    return c.json(
+      { error: { code: "SERVER_NOT_FOUND", message: "Server not found." } },
+      404
+    );
+  }
+  return c.json({ ok: true });
+});
+
+// Launch a `claude remote-control` server in the repository (or worktree).
+// This starts a process that can spawn write-capable Claude Code sessions — an
+// explicit, opt-in action distinct from the read-only viewer.
+app.post("/repositories/:repositoryId/remote-control", async (c) => {
+  const repository = await getRecentRepository(c.req.param("repositoryId"));
+
+  if (!repository) {
+    return c.json(
+      {
+        error: { code: "REPOSITORY_NOT_FOUND", message: "Repository not found." }
+      },
+      404
+    );
+  }
+
+  try {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      name?: string;
+      spawn?: string;
+      capacity?: number;
+      permissionMode?: string;
+      worktree?: string;
+    };
+
+    const spawnMode = (body.spawn ?? "same-dir") as SpawnMode;
+    const permissionMode = (body.permissionMode ?? "auto") as PermissionMode;
+
+    if (!SPAWN_MODES.includes(spawnMode)) {
+      throw new Error("Invalid spawn mode.");
+    }
+    if (!PERMISSION_MODES.includes(permissionMode)) {
+      throw new Error("Invalid permission mode.");
+    }
+
+    const capacity = Number.isFinite(body.capacity)
+      ? Math.max(1, Math.min(64, Math.trunc(body.capacity as number)))
+      : 4;
+    const effectivePath = await resolveWorktreePath(repository, body.worktree);
+    const name =
+      (body.name ?? "").trim() ||
+      `${repository.name}_${spawnMode}`;
+
+    const server = await startRemoteControl({
+      cwd: effectivePath,
+      name,
+      spawn: spawnMode,
+      capacity,
+      permissionMode
+    });
+
+    return c.json({ server });
+  } catch (error) {
+    if (error instanceof ClaudeUnavailableError) {
+      return c.json(
+        {
+          error: {
+            code: "CLAUDE_TOOL_MISSING",
+            message:
+              "The `claude` CLI is required. Install Claude Code and sign in first."
+          }
+        },
+        503
+      );
+    }
+
+    const message =
+      error instanceof Error ? error.message : "Failed to start remote control.";
+    return c.json(
+      { error: { code: "REMOTE_CONTROL_FAILED", message } },
+      400
+    );
+  }
 });
 
 // Preview a presentation (.pptx/.ppt/.odp) by converting it to PDF with

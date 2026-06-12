@@ -1584,7 +1584,10 @@ function RepositoryView({
           />
         ) : activeTab === "Agents" ? (
           <RepoAgentsTab
+            repositoryId={repositoryId}
+            repositoryName={selectedRepository?.name ?? "project"}
             repositoryPath={selectedRepository?.path ?? null}
+            worktreeParam={worktreeParam}
             onOpenWorktree={onOpenWorktreePath}
           />
         ) : (
