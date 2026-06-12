@@ -873,10 +873,11 @@ function RecentRepositoryGroups({
   onSelectRepository: (repository: RecentRepository) => void;
 }) {
   const groups = groupRepositoriesByRepo(repositories);
-  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
+  // Collapsed by default: track which groups the user has explicitly expanded.
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
   function toggleGroup(key: string) {
-    setCollapsedKeys((current) => {
+    setExpandedKeys((current) => {
       const next = new Set(current);
       if (next.has(key)) {
         next.delete(key);
@@ -890,60 +891,63 @@ function RecentRepositoryGroups({
   return (
     <div className="flex flex-col gap-1 pb-4">
       {groups.map((group) => {
-        // A repository with no extra worktrees stays as a single flat item.
-        if (group.entries.length === 1) {
-          const entry = group.entries[0];
-          return (
-            <button
-              key={entry.id}
-              type="button"
-              onClick={() => onSelectRepository(entry)}
-              className={cn(
-                "flex flex-col gap-0.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-sidebar-accent",
-                entry.id === selectedRepository?.id &&
-                  "bg-sidebar-accent text-sidebar-accent-foreground"
-              )}
-            >
-              <span className="truncate text-sm font-medium">
-                {group.repoName}
-              </span>
-              <span className="truncate text-xs text-muted-foreground">
-                {entry.path}
-              </span>
-            </button>
-          );
-        }
-
-        const isCollapsed = collapsedKeys.has(group.key);
-        const hasSelected = group.entries.some(
+        // Every repository uses the same row: a chevron (when it has linked
+        // worktrees), the repo name, and a worktree count. The primary entry
+        // (its main worktree) is what the row opens.
+        const primary = group.entries[0];
+        const hasWorktrees = group.entries.length > 1;
+        const isExpanded = expandedKeys.has(group.key);
+        const groupHasSelected = group.entries.some(
           (entry) => entry.id === selectedRepository?.id
         );
 
         return (
           <div key={group.key} className="flex flex-col">
-            <button
-              type="button"
-              onClick={() => toggleGroup(group.key)}
+            <div
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-sidebar-accent",
-                hasSelected && isCollapsed && "text-sidebar-accent-foreground"
+                "flex items-center rounded-md transition-colors hover:bg-sidebar-accent",
+                !isExpanded &&
+                  groupHasSelected &&
+                  "bg-sidebar-accent text-sidebar-accent-foreground"
               )}
             >
-              {isCollapsed ? (
-                <ChevronRight size={15} className="shrink-0 text-muted-foreground" />
+              {hasWorktrees ? (
+                <button
+                  type="button"
+                  aria-label={isExpanded ? "Collapse worktrees" : "Expand worktrees"}
+                  onClick={() => toggleGroup(group.key)}
+                  className="flex shrink-0 items-center self-stretch rounded-l-md px-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  {isExpanded ? (
+                    <ChevronDown size={15} />
+                  ) : (
+                    <ChevronRight size={15} />
+                  )}
+                </button>
               ) : (
-                <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
+                <span className="w-[27px] shrink-0" aria-hidden />
               )}
-              <span className="flex-1 truncate text-sm font-medium">
-                {group.repoName}
-              </span>
-              <span className="shrink-0 rounded-full bg-sidebar-accent px-1.5 text-xs text-muted-foreground">
-                {group.entries.length}
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => onSelectRepository(primary)}
+                className="flex min-w-0 flex-1 flex-col gap-0.5 py-2 pr-1 text-left"
+              >
+                <span className="truncate text-sm font-medium">
+                  {group.repoName}
+                </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {primary.path}
+                </span>
+              </button>
+              {hasWorktrees ? (
+                <span className="mr-2 shrink-0 rounded-full bg-sidebar-accent px-1.5 text-xs text-muted-foreground">
+                  {group.entries.length}
+                </span>
+              ) : null}
+            </div>
 
-            {isCollapsed ? null : (
-              <div className="flex flex-col gap-0.5 border-l border-border pl-2 ml-3">
+            {hasWorktrees && isExpanded ? (
+              <div className="ml-3 flex flex-col gap-0.5 border-l border-border pl-2">
                 {group.entries.map((entry) => (
                   <button
                     key={entry.id}
@@ -962,7 +966,7 @@ function RecentRepositoryGroups({
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
         );
       })}
