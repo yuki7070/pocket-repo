@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Code2,
   Copy,
+  Eye,
+  EyeOff,
   ExternalLink,
   File,
   Folder,
@@ -98,12 +100,15 @@ type WorktreeSummary = {
   detached: boolean;
 };
 
+const SHOW_HIDDEN_STORAGE_KEY = "pocket-repo:show-hidden";
+
 type FileEntry = {
   name: string;
   path: string;
   type: "file" | "directory";
   size: number | null;
   lastModifiedAt: string;
+  ignored?: boolean;
 };
 
 type FileContent = {
@@ -154,6 +159,7 @@ export function RepositoryDashboard() {
   const [worktrees, setWorktrees] = useState<WorktreeSummary[]>([]);
   const [selectedWorktreePath, setSelectedWorktreePath] = useState("");
   const [currentPath, setCurrentPath] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [selectedFile, setSelectedFile] = useState<FileContent | null>(null);
@@ -169,6 +175,18 @@ export function RepositoryDashboard() {
   const [isOpening, setIsOpening] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const didApplyInitialUrl = useRef(false);
+
+  // "Show hidden" is a sticky display preference, persisted across repositories
+  // and sessions in localStorage (kept out of the URL, which encodes navigation).
+  useEffect(() => {
+    if (window.localStorage.getItem(SHOW_HIDDEN_STORAGE_KEY) === "1") {
+      setShowHidden(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(SHOW_HIDDEN_STORAGE_KEY, showHidden ? "1" : "0");
+  }, [showHidden]);
 
   const selectedRepository = useMemo(() => {
     return (
@@ -357,6 +375,9 @@ export function RepositoryDashboard() {
         if (worktreeParam) {
           searchParams.set("worktree", worktreeParam);
         }
+        if (showHidden) {
+          searchParams.set("hidden", "1");
+        }
         const response = await fetch(
           `/api/repositories/${selectedRepository?.id}/files?${searchParams}`
         );
@@ -393,7 +414,7 @@ export function RepositoryDashboard() {
     return () => {
       mounted = false;
     };
-  }, [selectedRepository, currentPath, worktreeParam]);
+  }, [selectedRepository, currentPath, worktreeParam, showHidden]);
 
   useEffect(() => {
     if (!selectedRepository || !selectedFilePath) {
@@ -745,6 +766,8 @@ export function RepositoryDashboard() {
             activeTab={activeTab}
             currentPath={currentPath}
             entries={entries}
+            showHidden={showHidden}
+            onToggleHidden={() => setShowHidden((value) => !value)}
             fileErrorMessage={fileErrorMessage}
             isFilesLoading={isFilesLoading}
             selectedFile={selectedFile}
@@ -1183,6 +1206,8 @@ function RepositoryView({
   activeTab,
   currentPath,
   entries,
+  showHidden,
+  onToggleHidden,
   fileErrorMessage,
   isFilesLoading,
   selectedFile,
@@ -1203,6 +1228,8 @@ function RepositoryView({
   activeTab: string;
   currentPath: string;
   entries: FileEntry[];
+  showHidden: boolean;
+  onToggleHidden: () => void;
   fileErrorMessage: string | null;
   isFilesLoading: boolean;
   selectedFile: FileContent | null;
@@ -1493,7 +1520,23 @@ function RepositoryView({
             <Card className="overflow-hidden py-0">
               <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground">
                 <span>Name</span>
-                <span>Size</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={onToggleHidden}
+                    aria-pressed={showHidden}
+                    title={
+                      showHidden
+                        ? "Hide gitignored files"
+                        : "Show gitignored files"
+                    }
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                    <span className="hidden sm:inline">Hidden</span>
+                  </button>
+                  <span>Size</span>
+                </div>
               </div>
               {isFilesLoading && entries.length === 0 ? (
                 <div className="flex flex-col gap-2 p-3">
@@ -1520,7 +1563,10 @@ function RepositoryView({
                     return (
                       <div
                         key={entry.path}
-                        className="group flex items-center gap-1 pr-2 transition-colors hover:bg-muted/50"
+                        className={`group flex items-center gap-1 pr-2 transition-colors hover:bg-muted/50 ${
+                          entry.ignored ? "opacity-50" : ""
+                        }`}
+                        title={entry.ignored ? "Gitignored" : undefined}
                       >
                         <button
                           type="button"

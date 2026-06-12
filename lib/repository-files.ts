@@ -110,6 +110,8 @@ export type FileEntry = {
   type: "file" | "directory";
   size: number | null;
   lastModifiedAt: string;
+  /** True when the entry is gitignored. Only surfaced when includeIgnored is set. */
+  ignored: boolean;
 };
 
 export type FileContent = {
@@ -123,7 +125,11 @@ export type FileContent = {
   isMarp: boolean;
 };
 
-export async function listDirectory(repositoryPath: string, relativePath: string) {
+export async function listDirectory(
+  repositoryPath: string,
+  relativePath: string,
+  options: { includeIgnored?: boolean } = {}
+) {
   const absolutePath = resolveRepositoryPath(repositoryPath, relativePath);
   const stats = await lstat(absolutePath);
 
@@ -131,6 +137,8 @@ export async function listDirectory(repositoryPath: string, relativePath: string
     throw new Error("Path is not a directory.");
   }
 
+  // The `.git` directory is always hidden, even when including ignored entries:
+  // it is huge, noisy, and meaningless in a read-only viewer.
   const entries = await readdir(absolutePath, { withFileTypes: true });
   const candidateEntries = entries.filter((entry) => entry.name !== ".git");
   const ignoredPaths = await listIgnoredPaths(
@@ -139,13 +147,15 @@ export async function listDirectory(repositoryPath: string, relativePath: string
       normalizeRelativePath(path.posix.join(toPosixPath(relativePath), entry.name))
     )
   );
-  const visibleEntries = candidateEntries.filter((entry) => {
-    const entryRelativePath = normalizeRelativePath(
-      path.posix.join(toPosixPath(relativePath), entry.name)
-    );
+  const visibleEntries = options.includeIgnored
+    ? candidateEntries
+    : candidateEntries.filter((entry) => {
+        const entryRelativePath = normalizeRelativePath(
+          path.posix.join(toPosixPath(relativePath), entry.name)
+        );
 
-    return !ignoredPaths.has(entryRelativePath);
-  });
+        return !ignoredPaths.has(entryRelativePath);
+      });
   const fileEntries = await Promise.all(
     visibleEntries
       .map(async (entry) => {
@@ -160,7 +170,8 @@ export async function listDirectory(repositoryPath: string, relativePath: string
           path: entryRelativePath,
           type: entry.isDirectory() ? "directory" : "file",
           size: entry.isDirectory() ? null : entryStats.size,
-          lastModifiedAt: entryStats.mtime.toISOString()
+          lastModifiedAt: entryStats.mtime.toISOString(),
+          ignored: ignoredPaths.has(entryRelativePath)
         } satisfies FileEntry;
       })
   );
