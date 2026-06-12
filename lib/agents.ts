@@ -4,6 +4,7 @@ import { open, readdir, readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { listRemoteControlSessionIds } from "./remote-control";
 
 const execFileAsync = promisify(execFile);
 
@@ -55,12 +56,62 @@ export async function listAgentSessions() {
     }
   }
 
+  await linkSameDirSessions(sessions);
+
   return sessions.sort((a, b) => {
     if (a.running !== b.running) {
       return a.running ? -1 : 1;
     }
     return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
   });
+}
+
+// Same-dir sessions (all sharing a server's cwd) don't record their own
+// claude.ai id, but the server's log lists its active session ids in creation
+// order. Map them positionally: oldest local session ↔ oldest active id. Only
+// when the counts match exactly, so an unrelated standalone `claude` in the same
+// directory (which throws off the count) leaves everything unlinked rather than
+// risk pointing a row at the wrong session.
+async function linkSameDirSessions(sessions: AgentSession[]) {
+  const needsLink = (session: AgentSession) =>
+    !session.url && session.tool === "claude" && Boolean(session.cwd);
+  if (!sessions.some(needsLink)) {
+    return;
+  }
+
+  let servers;
+  try {
+    servers = await listRemoteControlSessionIds();
+  } catch {
+    return;
+  }
+
+  for (const server of servers) {
+    if (server.sessionIds.length === 0) {
+      continue;
+    }
+    const local = sessions
+      .filter((session) => needsLink(session) && session.cwd === server.cwd)
+      .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    if (local.length !== server.sessionIds.length) {
+      continue;
+    }
+    local.forEach((session, index) => {
+      session.url = `https://claude.ai/code/${server.sessionIds[index]}?from=cli`;
+    });
+  }
+}
+
+// A `claude remote-control` server in worktree spawn mode isolates each
+// on-demand session in its own worktree named `bridge-cse_<id>`, where <id> is
+// the claude.ai session id (same 24-char format as session_/env_ ids). Pull it
+// out of the path to build a direct per-session link. Same-dir spawned sessions
+// share one cwd with no embedded id, so they get no link here.
+const WORKTREE_SESSION_RE = /\/\.claude\/worktrees\/bridge-cse_([A-Za-z0-9]+)$/;
+
+function worktreeSessionUrl(cwd: string): string | null {
+  const match = cwd.match(WORKTREE_SESSION_RE);
+  return match ? `https://claude.ai/code/session_${match[1]}?from=cli` : null;
 }
 
 function isPidAlive(pid: number | null) {
@@ -124,14 +175,94 @@ async function listClaudeSessions(): Promise<AgentSession[]> {
         updatedAt: data.updatedAt ?? data.startedAt ?? null,
         url: data.bridgeSessionId
           ? `https://claude.ai/code/${data.bridgeSessionId}?from=cli`
-          : null
+          : worktreeSessionUrl(data.cwd ?? "")
       });
     } catch {
       // Skip malformed session files.
     }
   }
 
+  await Promise.all(
+    sessions.map(async (session) => {
+      session.name = await readClaudeSessionTitle(session.cwd, session.id);
+    })
+  );
+
   return sessions;
+}
+
+// Claude Code records an AI-generated session title (`ai-title` entries) in the
+// session transcript at ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl. It's
+// updated as the session progresses, so the last one is current. Transcripts can
+// be tens of MB, so read only the tail; fall back to the last user prompt.
+function projectTranscriptPath(cwd: string, sessionId: string) {
+  const encoded = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  return path.join(os.homedir(), ".claude", "projects", encoded, `${sessionId}.jsonl`);
+}
+
+async function readClaudeSessionTitle(
+  cwd: string,
+  sessionId: string
+): Promise<string | null> {
+  if (!cwd || !sessionId) {
+    return null;
+  }
+
+  const file = projectTranscriptPath(cwd, sessionId);
+  const tail = await readTail(file, 262_144);
+  if (!tail) {
+    return null;
+  }
+
+  // Scan newest-first; the title is preferred, the last prompt is a fallback.
+  let fallback: string | null = null;
+  const lines = tail.split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!line.includes('"ai-title"') && !line.includes('"last-prompt"')) {
+      continue;
+    }
+    try {
+      const entry = JSON.parse(line) as {
+        type?: string;
+        aiTitle?: string;
+        lastPrompt?: string;
+      };
+      if (entry.type === "ai-title" && entry.aiTitle) {
+        return entry.aiTitle;
+      }
+      if (entry.type === "last-prompt" && entry.lastPrompt && !fallback) {
+        fallback = entry.lastPrompt.replace(/\s+/g, " ").trim().slice(0, 80);
+      }
+    } catch {
+      // Partial line at the tail boundary; ignore.
+    }
+  }
+
+  return fallback;
+}
+
+// Read up to the last `maxBytes` of a file, as UTF-8. Returns "" if missing.
+async function readTail(file: string, maxBytes: number): Promise<string> {
+  let handle;
+  try {
+    handle = await open(file, "r");
+  } catch {
+    return "";
+  }
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - maxBytes);
+    const length = Number(size) - start;
+    if (length <= 0) {
+      return "";
+    }
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, start);
+    return buffer.toString("utf8");
+  } finally {
+    await handle.close();
+  }
 }
 
 async function listCodexSessions(): Promise<AgentSession[]> {
