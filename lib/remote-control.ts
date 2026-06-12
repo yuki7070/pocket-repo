@@ -258,6 +258,19 @@ function stripAnsi(value: string) {
   );
 }
 
+// Pull the claude.ai/code link out of a server's log so the UI can offer a
+// tap-to-open shortcut. The environment URL is plain text (survives stripAnsi)
+// and is the canonical entry to the server; the per-session URL lives inside an
+// OSC-8 hyperlink, so read it from the raw log before it's stripped.
+function extractConnectUrl(rawLog: string): string | null {
+  const env = rawLog.match(/https:\/\/claude\.ai\/code\?environment=env_[A-Za-z0-9]+/);
+  if (env) {
+    return env[0];
+  }
+  const session = rawLog.match(/https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+/);
+  return session ? `${session[0]}?from=cli` : null;
+}
+
 export async function listRemoteControls() {
   const servers = await readRegistry();
   const alive = servers.filter((server) => isPidAlive(server.pid));
@@ -267,10 +280,14 @@ export async function listRemoteControls() {
   }
 
   return Promise.all(
-    alive.map(async (server) => ({
-      ...server,
-      log: stripAnsi(await tailLog(server.logFile))
-    }))
+    alive.map(async (server) => {
+      const rawLog = await tailLog(server.logFile);
+      return {
+        ...server,
+        log: stripAnsi(rawLog),
+        url: extractConnectUrl(rawLog)
+      };
+    })
   );
 }
 
