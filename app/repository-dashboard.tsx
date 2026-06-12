@@ -71,7 +71,8 @@ type RecentRepository = {
 };
 
 type RepositorySummary = {
-  currentBranch: string;
+  isGitRepository: boolean;
+  currentBranch: string | null;
   branchCount: number;
   worktreeCount: number;
   dirty: boolean;
@@ -773,7 +774,7 @@ function SidebarContent({
 
       <div className="flex flex-col gap-2 px-3 pt-3">
         <Button className="w-full" variant="outline" onClick={onOpenPicker}>
-          Open repository
+          Open project
         </Button>
         <button
           type="button"
@@ -999,9 +1000,10 @@ function RepositoryPickerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Open repository</DialogTitle>
+          <DialogTitle>Open project</DialogTitle>
           <DialogDescription>
-            Select a folder under your home directory.
+            Select any folder under your home directory. Git repositories are
+            marked, but plain folders can be opened too.
           </DialogDescription>
         </DialogHeader>
         <DirectoryBrowser
@@ -1058,15 +1060,17 @@ function DirectoryBrowser({
 
       <Button
         className="w-full"
-        disabled={!directoryListing?.isRepository || isOpening}
+        disabled={!directoryListing || isOpening}
         onClick={() => {
-          if (directoryListing?.isRepository) {
+          if (directoryListing) {
             onOpenRepository(directoryListing.path);
           }
         }}
       >
         {isOpening ? <Loader2 className="animate-spin" /> : null}
-        Open this repository
+        {directoryListing?.isRepository
+          ? "Open this repository"
+          : "Open this folder"}
       </Button>
 
       <ScrollArea className="h-64 rounded-md border border-border">
@@ -1205,13 +1209,17 @@ function RepositoryView({
           </h1>
           <div className="flex items-center gap-2">
             <Badge variant="secondary">Read-only</Badge>
-            <Badge variant={summary?.dirty ? "default" : "secondary"}>
-              {summary?.dirty ? `${summary.changedFileCount} changed` : "Clean"}
-            </Badge>
+            {summary && !summary.isGitRepository ? (
+              <Badge variant="secondary">Not a Git repository</Badge>
+            ) : summary?.isGitRepository ? (
+              <Badge variant={summary.dirty ? "default" : "secondary"}>
+                {summary.dirty ? `${summary.changedFileCount} changed` : "Clean"}
+              </Badge>
+            ) : null}
           </div>
         </div>
         <p className="truncate text-sm text-muted-foreground">
-          {selectedRepository?.path ?? "Open a local Git repository to begin."}
+          {selectedRepository?.path ?? "Open a local project to begin."}
         </p>
       </section>
 
@@ -1292,12 +1300,12 @@ function RepositoryView({
                   })}
                 </SelectContent>
               </Select>
-            ) : (
+            ) : summary?.isGitRepository ? (
               <Button variant="outline" size="sm">
                 <GitBranch size={16} />
-                {summary?.currentBranch ?? "main"}
+                {summary.currentBranch ?? "detached"}
               </Button>
-            )}
+            ) : null}
             <Breadcrumb className="min-w-0 flex-1">
               <BreadcrumbList>
                 <BreadcrumbItem>
@@ -1474,6 +1482,7 @@ function RepositoryView({
           <StatusTab
             repositoryId={repositoryId}
             worktreeParam={worktreeParam}
+            isGitRepository={summary?.isGitRepository ?? true}
             onOpenFile={handleOpenFromTab}
           />
         ) : activeTab === "Search" ? (
@@ -1534,10 +1543,12 @@ const WORKING_TREE = "__working_tree__";
 function StatusTab({
   repositoryId,
   worktreeParam,
+  isGitRepository,
   onOpenFile
 }: {
   repositoryId: string | null;
   worktreeParam: string;
+  isGitRepository: boolean;
   onOpenFile: (filePath: string) => void;
 }) {
   const [entries, setEntries] = useState<StatusEntry[]>([]);
@@ -1653,6 +1664,17 @@ function StatusTab({
   const emptyMessage = isDiff
     ? `No differences from ${compareBase}.`
     : "Working tree clean — no changes.";
+
+  if (!isGitRepository) {
+    return (
+      <Card className="overflow-hidden py-0">
+        <div className="p-6 text-center text-sm text-muted-foreground">
+          This project is not a Git repository, so there are no changes or
+          branches to show.
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="overflow-hidden py-0">

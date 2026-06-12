@@ -144,14 +144,26 @@ async function resolveRepositoryRoot(inputPath: string) {
   const stats = await stat(absolutePath);
 
   if (!stats.isDirectory()) {
-    throw new Error("Repository path must be a directory.");
+    throw new Error("Project path must be a directory.");
   }
 
-  const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], {
-    cwd: absolutePath
-  });
+  // Prefer the Git top-level so a path inside a repo resolves to its root. A
+  // non-Git directory is still a valid project: fall back to the path itself.
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "--show-toplevel"],
+      { cwd: absolutePath }
+    );
+    const topLevel = stdout.trim();
+    if (topLevel) {
+      return topLevel;
+    }
+  } catch {
+    // Not a Git repository — open the directory as a plain project.
+  }
 
-  return stdout.trim();
+  return absolutePath;
 }
 
 async function readRecentRepositoriesFile(): Promise<RecentRepositoriesFile> {

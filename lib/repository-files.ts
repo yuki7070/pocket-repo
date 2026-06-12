@@ -301,25 +301,21 @@ async function listIgnoredPaths(repositoryPath: string, relativePaths: string[])
     return new Set<string>();
   }
 
-  return new Promise<Set<string>>((resolve, reject) => {
+  return new Promise<Set<string>>((resolve) => {
     const child = spawn("git", ["check-ignore", "-z", "--stdin"], {
       cwd: repositoryPath,
       stdio: ["pipe", "pipe", "pipe"]
     });
     const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
 
     child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-    child.on("error", reject);
+    // A non-Git directory has nothing to ignore; don't fail the listing.
+    child.on("error", () => resolve(new Set<string>()));
     child.on("close", (code) => {
+      // 0 = some paths ignored, 1 = none ignored. Anything else (e.g. 128 for a
+      // non-Git directory) means we simply can't filter — show everything.
       if (code !== 0 && code !== 1) {
-        reject(
-          new Error(
-            Buffer.concat(stderr).toString("utf8") ||
-              `git check-ignore failed with exit code ${code}`
-          )
-        );
+        resolve(new Set<string>());
         return;
       }
 

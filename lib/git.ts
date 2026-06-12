@@ -1,9 +1,27 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+// Whether a directory is inside a Git working tree. Non-Git directories are
+// still openable as plain projects, so callers degrade gracefully.
+export async function isGitRepository(repositoryPath: string) {
+  if (!repositoryPath || !existsSync(repositoryPath)) {
+    return false;
+  }
+  try {
+    const output = await git(repositoryPath, [
+      "rev-parse",
+      "--is-inside-work-tree"
+    ]);
+    return output.trim() === "true";
+  } catch {
+    return false;
+  }
+}
 
 export type WorktreeContext = {
   repoRoot: string;
@@ -70,7 +88,8 @@ export async function getWorktreeContext(
 }
 
 export type RepositorySummary = {
-  currentBranch: string;
+  isGitRepository: boolean;
+  currentBranch: string | null;
   branchCount: number;
   worktreeCount: number;
   dirty: boolean;
@@ -85,7 +104,20 @@ export type WorktreeSummary = {
   detached: boolean;
 };
 
-export async function getRepositorySummary(repositoryPath: string) {
+export async function getRepositorySummary(
+  repositoryPath: string
+): Promise<RepositorySummary> {
+  if (!(await isGitRepository(repositoryPath))) {
+    return {
+      isGitRepository: false,
+      currentBranch: null,
+      branchCount: 0,
+      worktreeCount: 0,
+      dirty: false,
+      changedFileCount: 0
+    };
+  }
+
   const [currentBranch, branches, statusEntries, worktrees] = await Promise.all([
     git(repositoryPath, ["branch", "--show-current"]),
     git(repositoryPath, ["branch", "--format=%(refname:short)"]),
@@ -105,6 +137,7 @@ export async function getRepositorySummary(repositoryPath: string) {
   const activeBranch = currentBranch.trim() || "detached";
 
   return {
+    isGitRepository: true,
     currentBranch: activeBranch,
     branchCount:
       branchList.length === 0 && activeBranch !== "detached"
@@ -124,6 +157,10 @@ export type StatusEntry = {
 };
 
 export async function getStatusEntries(repositoryPath: string) {
+  if (!(await isGitRepository(repositoryPath))) {
+    return [] as StatusEntry[];
+  }
+
   const output = await git(repositoryPath, ["status", "--porcelain=v1", "-z"]);
   const tokens = output.split("\0");
   const entries: StatusEntry[] = [];
@@ -156,6 +193,10 @@ export async function getStatusEntries(repositoryPath: string) {
 }
 
 export async function listBranches(repositoryPath: string) {
+  if (!(await isGitRepository(repositoryPath))) {
+    return [] as string[];
+  }
+
   const output = await git(repositoryPath, [
     "branch",
     "--format=%(refname:short)"
@@ -231,6 +272,14 @@ export async function searchFileNames(
     return [] as string[];
   }
 
+  // Non-Git projects have no index, so fall back to a bounded filesystem walk.
+  if (!(await isGitRepository(repositoryPath))) {
+    const files = await walkProjectFiles(repositoryPath);
+    return files
+      .filter((file) => file.toLowerCase().includes(trimmed))
+      .slice(0, limit);
+  }
+
   const output = await git(repositoryPath, [
     "ls-files",
     "-z",
@@ -252,8 +301,67 @@ export async function searchFileNames(
     .slice(0, limit);
 }
 
+// Directories skipped when walking a non-Git project (no .gitignore to rely on).
+const WALK_SKIP_DIRS = new Set([
+  ".git",
+  "node_modules",
+  ".next",
+  "dist",
+  "build",
+  "out",
+  "coverage",
+  ".cache",
+  ".turbo",
+  "vendor",
+  "target"
+]);
+const WALK_FILE_CAP = 20_000;
+
+async function walkProjectFiles(root: string) {
+  const results: string[] = [];
+
+  async function walk(directory: string, relative: string) {
+    if (results.length >= WALK_FILE_CAP) {
+      return;
+    }
+
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (results.length >= WALK_FILE_CAP) {
+        return;
+      }
+
+      const entryRelative = relative ? `${relative}/${entry.name}` : entry.name;
+
+      if (entry.isDirectory()) {
+        if (WALK_SKIP_DIRS.has(entry.name)) {
+          continue;
+        }
+        await walk(path.join(directory, entry.name), entryRelative);
+      } else if (entry.isFile()) {
+        results.push(entryRelative);
+      }
+    }
+  }
+
+  await walk(root, "");
+  return results;
+}
+
 export async function listWorktrees(repositoryPath: string) {
-  const output = await git(repositoryPath, ["worktree", "list", "--porcelain"]);
+  let output: string;
+  try {
+    output = await git(repositoryPath, ["worktree", "list", "--porcelain"]);
+  } catch {
+    // Non-Git directory (or no worktree support): treat as no worktrees.
+    return [] as WorktreeSummary[];
+  }
   const records = output
     .split("\n\n")
     .map((record) => record.trim())
