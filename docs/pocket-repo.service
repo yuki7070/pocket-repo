@@ -10,6 +10,13 @@
 #
 # Keep it running while logged out (optional):
 #   loginctl enable-linger "$USER"
+#
+# Note: "remote control" servers you launch from the Agents tab run as their own
+# transient `pocket-repo-rc-*.service` units (via systemd-run --user), so
+# restarting or stopping THIS service does not kill them. Manage them with:
+#   systemctl --user list-units 'pocket-repo-rc-*'
+#   systemctl --user stop pocket-repo-rc-<id>.service
+# (No KillMode change is needed here — they live in their own cgroup.)
 
 [Unit]
 Description=Pocket Repo — local read-only Git repository viewer
