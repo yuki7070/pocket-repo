@@ -5,6 +5,7 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   Folder,
   GitBranch,
   Loader2,
@@ -55,6 +56,7 @@ type RemoteControlServer = {
   permissionMode: string;
   startedAt: string;
   log?: string;
+  url?: string | null;
 };
 
 export type AgentSession = {
@@ -496,6 +498,22 @@ function RemoteControlPanel({
                       {server.permissionMode}
                     </div>
                   </div>
+                  {server.url ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      render={
+                        <a
+                          href={server.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        />
+                      }
+                    >
+                      <ExternalLink size={14} />
+                      Open
+                    </Button>
+                  ) : null}
                   {server.log ? (
                     <Button
                       variant="ghost"
