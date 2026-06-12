@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   Bot,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Code2,
+  Copy,
   ExternalLink,
   File,
   Folder,
@@ -1160,6 +1162,12 @@ function RepositoryView({
   const hasWorktreeSwitcher = worktrees.length > 1;
   const repositoryId = selectedRepository?.id ?? null;
 
+  // Absolute on-disk path for a repo-relative path, for the copy-path buttons.
+  function toAbsolutePath(relativePath: string) {
+    const base = activeWorktreePath.replace(/\/+$/, "");
+    return relativePath ? `${base}/${relativePath}` : base;
+  }
+
   function buildRawUrl(filePath: string) {
     const params = new URLSearchParams({ path: filePath });
     if (worktreeParam) {
@@ -1218,9 +1226,18 @@ function RepositoryView({
             ) : null}
           </div>
         </div>
-        <p className="truncate text-sm text-muted-foreground">
-          {selectedRepository?.path ?? "Open a local project to begin."}
-        </p>
+        <div className="flex min-w-0 items-center gap-1">
+          <p className="truncate text-sm text-muted-foreground">
+            {selectedRepository?.path ?? "Open a local project to begin."}
+          </p>
+          {selectedRepository ? (
+            <CopyButton
+              value={activeWorktreePath}
+              label="Copy project path"
+              className="-my-1"
+            />
+          ) : null}
+        </div>
       </section>
 
       <Tabs
@@ -1383,6 +1400,11 @@ function RepositoryView({
                     {formatBytes(selectedFile.size)}
                   </span>
                 ) : null}
+                <CopyButton
+                  value={toAbsolutePath(selectedFilePath)}
+                  label="Copy file path"
+                  className={selectedFile ? "" : "ml-auto"}
+                />
               </div>
               <div className="p-4">
                 {isFilesLoading && !selectedFile ? (
@@ -1435,25 +1457,33 @@ function RepositoryView({
                   {entries.map((entry) => {
                     const Icon = entry.type === "directory" ? Folder : File;
                     return (
-                      <button
+                      <div
                         key={entry.path}
-                        type="button"
-                        onClick={() => onOpenEntry(entry)}
-                        className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
+                        className="group flex items-center gap-1 pr-2 transition-colors hover:bg-muted/50"
                       >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <Icon
-                            size={16}
-                            className="shrink-0 text-muted-foreground"
-                          />
-                          <span className="truncate">{entry.name}</span>
-                        </span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {entry.type === "directory"
-                            ? "directory"
-                            : formatBytes(entry.size ?? 0)}
-                        </span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => onOpenEntry(entry)}
+                          className="flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-2.5 text-left text-sm"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <Icon
+                              size={16}
+                              className="shrink-0 text-muted-foreground"
+                            />
+                            <span className="truncate">{entry.name}</span>
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {entry.type === "directory"
+                              ? "directory"
+                              : formatBytes(entry.size ?? 0)}
+                          </span>
+                        </button>
+                        <CopyButton
+                          value={toAbsolutePath(entry.path)}
+                          label={`Copy ${entry.type === "directory" ? "folder" : "file"} path`}
+                        />
+                      </div>
                     );
                   })}
                 </div>
@@ -2014,6 +2044,73 @@ const PRESENTATION_EXTENSIONS = ["pptx", "ppt", "ppsx", "odp"];
 function isPresentationPath(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
   return extension ? PRESENTATION_EXTENSIONS.includes(extension) : false;
+}
+
+// Copy text to the clipboard. Prefers the async Clipboard API (secure
+// contexts) and falls back to a hidden textarea so it also works over plain
+// LAN HTTP, where the Clipboard API is unavailable.
+async function copyText(value: string) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // fall through to the legacy path
+  }
+
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.setAttribute("readonly", "");
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function CopyButton({
+  value,
+  label = "Copy path",
+  className
+}: {
+  value: string;
+  label?: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={async (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        if (await copyText(value)) {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        }
+      }}
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+        className
+      )}
+    >
+      {copied ? (
+        <Check size={14} className="text-green-500" />
+      ) : (
+        <Copy size={14} />
+      )}
+    </button>
+  );
 }
 
 function isExternalUrl(url: string) {
