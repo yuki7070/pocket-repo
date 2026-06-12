@@ -25,6 +25,8 @@ export type AgentSession = {
   running: boolean;
   startedAt: number | null;
   updatedAt: number | null;
+  // claude.ai/code link for sessions bridged to Remote Control; null otherwise.
+  url: string | null;
 };
 
 export async function listAgentSessions() {
@@ -94,6 +96,7 @@ async function listClaudeSessions(): Promise<AgentSession[]> {
         status?: string;
         startedAt?: number;
         updatedAt?: number;
+        bridgeSessionId?: string;
       };
 
       const pid =
@@ -118,7 +121,10 @@ async function listClaudeSessions(): Promise<AgentSession[]> {
         status: data.status ?? null,
         running: true,
         startedAt: data.startedAt ?? null,
-        updatedAt: data.updatedAt ?? data.startedAt ?? null
+        updatedAt: data.updatedAt ?? data.startedAt ?? null,
+        url: data.bridgeSessionId
+          ? `https://claude.ai/code/${data.bridgeSessionId}?from=cli`
+          : null
       });
     } catch {
       // Skip malformed session files.
@@ -171,7 +177,8 @@ async function listCodexSessions(): Promise<AgentSession[]> {
         status: null,
         running: now - updatedAt < CODEX_RUNNING_THRESHOLD_MS,
         startedAt,
-        updatedAt
+        updatedAt,
+        url: null
       });
     } catch {
       // Skip unreadable rollout files.
