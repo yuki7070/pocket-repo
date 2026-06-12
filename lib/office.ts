@@ -14,10 +14,15 @@ import os from "node:os";
 import path from "node:path";
 import { getPocketRepoHome } from "./config-store";
 
-// Office/presentation documents we can preview by converting to PDF via
-// LibreOffice. Limited to presentations for now; the same pipeline handles
-// docx/xlsx if extended later.
+// Office documents we can preview by converting to PDF via LibreOffice. The
+// same `--convert-to pdf` pipeline handles presentations and word-processor
+// documents alike.
 const PRESENTATION_EXTENSIONS = new Set([".pptx", ".ppt", ".ppsx", ".odp"]);
+const DOCUMENT_EXTENSIONS = new Set([".docx", ".doc", ".odt", ".rtf"]);
+const CONVERTIBLE_EXTENSIONS = new Set([
+  ...PRESENTATION_EXTENSIONS,
+  ...DOCUMENT_EXTENSIONS
+]);
 
 // Refuse to convert absurdly large inputs.
 const MAX_INPUT_BYTES = 100 * 1024 * 1024;
@@ -25,6 +30,24 @@ const CONVERT_TIMEOUT_MS = 60_000;
 
 export function isPresentationPath(filePath: string) {
   return PRESENTATION_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+// Office documents (presentations + word-processor files) that require a
+// LibreOffice conversion to PDF before they can be previewed.
+export function isConvertibleDocumentPath(filePath: string) {
+  return CONVERTIBLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+// PDFs are already in the preview format, so they are served inline without
+// any conversion (and without needing LibreOffice installed).
+export function isPdfPath(filePath: string) {
+  return path.extname(filePath).toLowerCase() === ".pdf";
+}
+
+// Anything we can show in the PDF preview frame: native PDFs plus the office
+// document types we convert to PDF.
+export function isPreviewableDocumentPath(filePath: string) {
+  return isPdfPath(filePath) || isConvertibleDocumentPath(filePath);
 }
 
 export class OfficeUnavailableError extends Error {
@@ -168,10 +191,11 @@ function cacheDir() {
   return path.join(getPocketRepoHome(), "cache", "office");
 }
 
-// Convert a presentation to PDF and return the cached PDF path. The result is
-// cached under ~/.pocket-repo/cache keyed by (path, size, mtime); the original
-// file is never modified and the PDF is written outside any repository.
-export async function convertPresentationToPdf(absoluteInputPath: string) {
+// Convert an office document (presentation or word-processor file) to PDF and
+// return the cached PDF path. The result is cached under ~/.pocket-repo/cache
+// keyed by (path, size, mtime); the original file is never modified and the PDF
+// is written outside any repository.
+export async function convertOfficeToPdf(absoluteInputPath: string) {
   const tool = await findTool();
   if (!tool) {
     throw new OfficeUnavailableError();
@@ -213,7 +237,14 @@ export async function convertPresentationToPdf(absoluteInputPath: string) {
       const producedPdf = path.join(workDir, `${baseName}.pdf`);
 
       if (!(await exists(producedPdf))) {
-        throw new Error("Conversion produced no output.");
+        // LibreOffice can exit 0 yet emit nothing when the component that
+        // handles this file type is not installed (e.g. Writer is missing, so
+        // .docx/.odt cannot be opened even though Impress handles .pptx).
+        throw new Error(
+          "LibreOffice could not convert this document. The component for this " +
+            "file type may be missing — install the full suite " +
+            "(e.g. `sudo apt install libreoffice`)."
+        );
       }
 
       // Move into the cache atomically so concurrent reads never see a partial
