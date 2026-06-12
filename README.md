@@ -45,6 +45,11 @@ npx pocket-repo
   underlying repo, with collapsible groups for their worktrees.
 - **Agents dashboard** — see which Claude Code and Codex sessions are running and
   which worktree each is working in, both globally and per repository.
+- **Remote control** *(opt-in)* — from a repository's Agents tab, launch a
+  `claude remote-control` server (spawn mode, capacity, permission mode) so you
+  can drive Claude Code sessions from [claude.ai/code](https://claude.ai/code)
+  or the Claude mobile app. This is the one action that can start
+  write-capable sessions; the viewer itself stays read-only.
 
 ## Tech stack
 
