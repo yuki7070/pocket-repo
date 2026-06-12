@@ -31,10 +31,13 @@ npx pocket-repo
   resolve against the repository.
 - **Marp slides** — Markdown decks (`marp: true`) render as slides, with a
   fullscreen slideshow and a Slides/Markdown/Code toggle.
-- **Presentation preview** *(optional)* — `.pptx` / `.ppt` / `.odp` files are
-  previewed as PDF when [LibreOffice](https://www.libreoffice.org/) is
-  installed (e.g. `sudo apt install libreoffice-impress`). Conversions are
-  cached; the original file is never modified.
+- **PDF preview** — `.pdf` files render inline in a viewer, with a button to
+  open them in a new tab. No extra tooling required.
+- **Office document preview** *(optional)* — presentations (`.pptx` / `.ppt` /
+  `.odp`) and documents (`.docx` / `.doc` / `.odt` / `.rtf`) are previewed as
+  PDF when [LibreOffice](https://www.libreoffice.org/) is installed (e.g.
+  `sudo apt install libreoffice`). Conversions are cached; the original file is
+  never modified.
 - **Status & branch diff** — see uncommitted working-tree changes, or compare
   the current branch against another branch (e.g. `develop`) to list the files
   that differ.

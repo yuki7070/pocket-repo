@@ -2150,10 +2150,21 @@ function isImagePath(name: string) {
 }
 
 const PRESENTATION_EXTENSIONS = ["pptx", "ppt", "ppsx", "odp"];
+const DOCUMENT_EXTENSIONS = ["docx", "doc", "odt", "rtf"];
 
-function isPresentationPath(name: string) {
+// Office documents that need a server-side LibreOffice conversion before they
+// can be previewed as a PDF.
+function isConvertibleDocumentPath(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
-  return extension ? PRESENTATION_EXTENSIONS.includes(extension) : false;
+  return extension
+    ? PRESENTATION_EXTENSIONS.includes(extension) ||
+        DOCUMENT_EXTENSIONS.includes(extension)
+    : false;
+}
+
+// Native PDFs are previewed directly, without LibreOffice.
+function isPdfPath(name: string) {
+  return name.split(".").pop()?.toLowerCase() === "pdf";
 }
 
 // Copy text to the clipboard. Prefers the async Clipboard API (secure
@@ -2495,60 +2506,98 @@ function MarpPreview({
   );
 }
 
-// Preview a presentation by rendering the server-converted PDF in an iframe.
-// Checks the `office` capability first so we can show install guidance when
-// LibreOffice is not available, rather than a broken frame.
-function OfficePreview({
+// Preview an office document or PDF in an iframe. Native PDFs (`needsLibreOffice`
+// false) are served as-is; presentations and word-processor documents are
+// rendered to PDF on the server. The PDF is fetched as a blob so that a failed
+// conversion (e.g. a missing LibreOffice component) surfaces as a readable
+// message with install guidance rather than a broken frame.
+function DocumentPreview({
   file,
-  pdfUrl
+  pdfUrl,
+  needsLibreOffice
 }: {
   file: FileContent;
   pdfUrl: string;
+  needsLibreOffice: boolean;
 }) {
-  const [office, setOffice] = useState<boolean | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [state, setState] = useState<{
+    status: "loading" | "ready" | "error";
+    url?: string;
+    message?: string;
+  }>({ status: "loading" });
 
   useEffect(() => {
-    let mounted = true;
-    fetch("/api/capabilities")
-      .then((response) => response.json())
-      .then((data) => {
-        if (mounted) {
-          setOffice(Boolean(data?.office));
+    let active = true;
+    let objectUrl: string | null = null;
+    setState({ status: "loading" });
+
+    fetch(pdfUrl)
+      .then(async (response) => {
+        if (!response.ok) {
+          let message = "Failed to render this file.";
+          try {
+            const data = await response.json();
+            if (data?.error?.message) {
+              message = data.error.message;
+            }
+          } catch {
+            // Non-JSON error body; keep the default message.
+          }
+          throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (active) {
+          setState({ status: "ready", url: objectUrl });
+        } else {
+          URL.revokeObjectURL(objectUrl);
         }
       })
-      .catch(() => {
-        if (mounted) {
-          setOffice(false);
+      .catch((error) => {
+        if (active) {
+          setState({
+            status: "error",
+            message:
+              error instanceof Error ? error.message : "Failed to render this file."
+          });
         }
       });
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
-  if (office === null) {
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [pdfUrl]);
+
+  if (state.status === "loading") {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="animate-spin" size={16} />
-        Checking preview support…
+        {needsLibreOffice ? "Converting…" : "Loading…"}
       </div>
     );
   }
 
-  if (!office) {
+  if (state.status === "error") {
     return (
       <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/30 p-4 text-sm">
-        <p className="font-medium">Presentation preview needs LibreOffice</p>
-        <p className="text-muted-foreground">
-          Install LibreOffice to render{" "}
-          <span className="font-mono">.pptx</span> /{" "}
-          <span className="font-mono">.ppt</span> files as a PDF preview, then
-          reopen this file.
-        </p>
-        <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">
-          <code>sudo apt install libreoffice-impress</code>
-        </pre>
+        <p className="font-medium">Could not preview this document</p>
+        <p className="text-muted-foreground">{state.message}</p>
+        {needsLibreOffice ? (
+          <>
+            <p className="text-muted-foreground">
+              Word documents (<span className="font-mono">.docx</span> /{" "}
+              <span className="font-mono">.doc</span>) need the LibreOffice
+              Writer component; presentations need Impress.
+            </p>
+            <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">
+              <code>sudo apt install libreoffice</code>
+            </pre>
+          </>
+        ) : null}
       </div>
     );
   }
@@ -2557,7 +2606,7 @@ function OfficePreview({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">
-          Rendered to PDF via LibreOffice
+          {needsLibreOffice ? "Rendered to PDF via LibreOffice" : "PDF preview"}
         </span>
         <a
           href={pdfUrl}
@@ -2569,20 +2618,11 @@ function OfficePreview({
           Open in new tab
         </a>
       </div>
-      <div className="relative min-h-24">
-        {!loaded ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="animate-spin" size={16} />
-            Converting…
-          </div>
-        ) : null}
-        <iframe
-          src={pdfUrl}
-          title={file.name}
-          onLoad={() => setLoaded(true)}
-          className="h-[75vh] w-full rounded-md border border-border bg-white"
-        />
-      </div>
+      <iframe
+        src={state.url}
+        title={file.name}
+        className="h-[75vh] w-full rounded-md border border-border bg-white"
+      />
     </div>
   );
 }
@@ -2615,10 +2655,17 @@ function FilePreview({
     );
   }
 
-  // Presentations are binary, so handle them before the binary/too-large
-  // fallbacks: they are previewed by converting to PDF on the server.
-  if (isPresentationPath(file.name)) {
-    return <OfficePreview file={file} pdfUrl={buildOfficeUrl(file.path)} />;
+  // Office documents and PDFs are binary, so handle them before the
+  // binary/too-large fallbacks: PDFs are served inline and the office document
+  // types are converted to PDF on the server.
+  if (isConvertibleDocumentPath(file.name) || isPdfPath(file.name)) {
+    return (
+      <DocumentPreview
+        file={file}
+        pdfUrl={buildOfficeUrl(file.path)}
+        needsLibreOffice={!isPdfPath(file.name)}
+      />
+    );
   }
 
   if (file.tooLarge) {

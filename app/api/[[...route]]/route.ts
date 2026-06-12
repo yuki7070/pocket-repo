@@ -33,9 +33,10 @@ import {
 } from "@/lib/repository-files";
 import { renderMarpDeck } from "@/lib/marp";
 import {
-  convertPresentationToPdf,
+  convertOfficeToPdf,
   isOfficeAvailable,
-  isPresentationPath,
+  isPdfPath,
+  isPreviewableDocumentPath,
   OfficeUnavailableError
 } from "@/lib/office";
 import {
@@ -828,10 +829,12 @@ app.post("/repositories/:repositoryId/remote-control", async (c) => {
   }
 });
 
-// Preview a presentation (.pptx/.ppt/.odp) by converting it to PDF with
-// LibreOffice and serving the PDF inline. The conversion result is cached and
-// the original file is never modified (read-only is preserved). Requires
-// LibreOffice to be installed; otherwise responds 503.
+// Preview an office document by serving it inline as a PDF. Native PDFs are
+// streamed as-is (no LibreOffice needed); presentations (.pptx/.ppt/.odp) and
+// word-processor documents (.docx/.doc/.odt/.rtf) are converted to PDF with
+// LibreOffice. Conversions are cached and the original file is never modified
+// (read-only is preserved). Requires LibreOffice for the convertible types;
+// otherwise responds 503.
 app.get("/render-office/:repositoryId/:filePath{.+}", async (c) => {
   const repository = await getRecentRepository(c.req.param("repositoryId"));
 
@@ -850,8 +853,8 @@ app.get("/render-office/:repositoryId/:filePath{.+}", async (c) => {
   try {
     const relativePath = c.req.param("filePath");
 
-    if (!isPresentationPath(relativePath)) {
-      throw new Error("Unsupported file type for slide preview.");
+    if (!isPreviewableDocumentPath(relativePath)) {
+      throw new Error("Unsupported file type for document preview.");
     }
 
     const effectivePath = await resolveWorktreePath(
@@ -859,7 +862,11 @@ app.get("/render-office/:repositoryId/:filePath{.+}", async (c) => {
       c.req.query("worktree")
     );
     const absolutePath = resolveRepositoryPath(effectivePath, relativePath);
-    const pdfPath = await convertPresentationToPdf(absolutePath);
+    // Native PDFs are already in the target format; only the office document
+    // types go through the LibreOffice conversion.
+    const pdfPath = isPdfPath(relativePath)
+      ? absolutePath
+      : await convertOfficeToPdf(absolutePath);
     const buffer = await readFile(pdfPath);
     const body = buffer.buffer.slice(
       buffer.byteOffset,
@@ -881,7 +888,7 @@ app.get("/render-office/:repositoryId/:filePath{.+}", async (c) => {
           error: {
             code: "OFFICE_TOOL_MISSING",
             message:
-              "LibreOffice is required to preview presentations. Install it (e.g. `sudo apt install libreoffice-impress`)."
+              "LibreOffice is required to preview Office documents. Install it (e.g. `sudo apt install libreoffice`)."
           }
         },
         503
@@ -889,14 +896,14 @@ app.get("/render-office/:repositoryId/:filePath{.+}", async (c) => {
     }
 
     const message =
-      error instanceof Error ? error.message : "Failed to render presentation.";
+      error instanceof Error ? error.message : "Failed to render document.";
 
     return c.json(
       {
         error: {
           code: message.includes("outside")
             ? "PATH_OUTSIDE_REPOSITORY"
-            : "PRESENTATION_RENDER_FAILED",
+            : "DOCUMENT_RENDER_FAILED",
           message
         }
       },
