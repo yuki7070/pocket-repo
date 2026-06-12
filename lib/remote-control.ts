@@ -305,11 +305,16 @@ export async function startRemoteControl(options: {
     options.name,
     "--spawn",
     options.spawn,
-    "--capacity",
-    String(options.capacity),
     "--permission-mode",
     options.permissionMode
   ];
+
+  // session mode is fixed at capacity 1; passing --capacity is rejected
+  // ("--capacity cannot be used with --spawn=session"), so only send it for
+  // the multi-session modes.
+  if (options.spawn !== "session") {
+    claudeArgs.push("--capacity", String(options.capacity));
+  }
 
   const systemd = await systemdRun();
   let pid: number;
