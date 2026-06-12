@@ -73,6 +73,7 @@ export type AgentSession = {
   running: boolean;
   startedAt: number | null;
   updatedAt: number | null;
+  url: string | null;
 };
 
 const REFRESH_INTERVAL_MS = 5000;
@@ -170,10 +171,11 @@ function AgentSessionRow({
   const title = session.name ?? session.branch ?? session.id.slice(0, 8);
 
   return (
+    <div className="flex w-full items-stretch transition-colors hover:bg-muted/50">
     <button
       type="button"
       onClick={() => onOpen(session.cwd)}
-      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/50"
+      className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left"
     >
       <span
         className={cn(
@@ -223,6 +225,20 @@ function AgentSessionRow({
         ) : null}
       </span>
     </button>
+      {session.url ? (
+        <a
+          href={session.url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(event) => event.stopPropagation()}
+          className="flex shrink-0 items-center gap-1 border-l border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title="Open this session in claude.ai/code"
+        >
+          <ExternalLink size={14} />
+          <span className="hidden sm:inline">Open</span>
+        </a>
+      ) : null}
+    </div>
   );
 }
 
