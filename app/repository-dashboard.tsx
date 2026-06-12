@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   BookOpen,
   Bot,
@@ -17,6 +18,7 @@ import {
   GitCompare,
   Loader2,
   Menu,
+  MoreVertical,
   Search,
   Settings,
   Smartphone
@@ -53,6 +55,12 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -1231,11 +1239,7 @@ function RepositoryView({
             {selectedRepository?.path ?? "Open a local project to begin."}
           </p>
           {selectedRepository ? (
-            <CopyButton
-              value={activeWorktreePath}
-              label="Copy project path"
-              className="-my-1"
-            />
+            <PathActionsMenu absolutePath={activeWorktreePath} className="-my-1" />
           ) : null}
         </div>
       </section>
@@ -1400,9 +1404,9 @@ function RepositoryView({
                     {formatBytes(selectedFile.size)}
                   </span>
                 ) : null}
-                <CopyButton
-                  value={toAbsolutePath(selectedFilePath)}
-                  label="Copy file path"
+                <PathActionsMenu
+                  relativePath={selectedFilePath}
+                  absolutePath={toAbsolutePath(selectedFilePath)}
                   className={selectedFile ? "" : "ml-auto"}
                 />
               </div>
@@ -1479,9 +1483,9 @@ function RepositoryView({
                               : formatBytes(entry.size ?? 0)}
                           </span>
                         </button>
-                        <CopyButton
-                          value={toAbsolutePath(entry.path)}
-                          label={`Copy ${entry.type === "directory" ? "folder" : "file"} path`}
+                        <PathActionsMenu
+                          relativePath={entry.path}
+                          absolutePath={toAbsolutePath(entry.path)}
                         />
                       </div>
                     );
@@ -2075,41 +2079,66 @@ async function copyText(value: string) {
   }
 }
 
-function CopyButton({
-  value,
-  label = "Copy path",
+// A kebab (⋮) menu offering "copy relative path" / "copy absolute path".
+// Relative is the repo-relative path; absolute is the on-disk path. The
+// relative item is omitted when there is no relative portion (e.g. the repo
+// root). A brief toast confirms the copy.
+function PathActionsMenu({
+  relativePath,
+  absolutePath,
   className
 }: {
-  value: string;
-  label?: string;
+  relativePath?: string;
+  absolutePath: string;
   className?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  async function copy(value: string, kind: string) {
+    if (await copyText(value)) {
+      setToast(`Copied ${kind} path`);
+      window.setTimeout(() => setToast(null), 1500);
+    }
+  }
 
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={async (event) => {
-        event.stopPropagation();
-        event.preventDefault();
-        if (await copyText(value)) {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        }
-      }}
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-        className
-      )}
-    >
-      {copied ? (
-        <Check size={14} className="text-green-500" />
-      ) : (
-        <Copy size={14} />
-      )}
-    </button>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label="Path actions"
+          onClick={(event) => event.stopPropagation()}
+          className={cn(
+            "inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted aria-expanded:text-foreground",
+            className
+          )}
+        >
+          <MoreVertical size={16} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          {relativePath ? (
+            <DropdownMenuItem onClick={() => copy(relativePath, "relative")}>
+              <Copy size={14} />
+              Copy relative path
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem onClick={() => copy(absolutePath, "absolute")}>
+            <Copy size={14} />
+            Copy absolute path
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {toast
+        ? createPortal(
+            <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[100] flex justify-center px-4">
+              <div className="flex items-center gap-2 rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background shadow-lg">
+                <Check size={14} />
+                {toast}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 }
 
