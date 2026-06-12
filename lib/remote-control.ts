@@ -99,6 +99,44 @@ export async function isClaudeAvailable() {
   return (await findClaude()) !== null;
 }
 
+// Claude stores per-directory "workspace trust" in ~/.claude.json. A
+// `remote-control` server refuses to start in an untrusted directory (it can't
+// pop the interactive trust dialog), so we mark the target cwd trusted before
+// launching — this is what the UI's "launch an agent server" action implies.
+// CLAUDE_CONFIG_DIR relocates the file when set.
+function claudeConfigPath() {
+  return path.join(process.env.CLAUDE_CONFIG_DIR || os.homedir(), ".claude.json");
+}
+
+async function ensureWorkspaceTrusted(cwd: string) {
+  const configPath = claudeConfigPath();
+
+  let config: Record<string, unknown>;
+  if (await exists(configPath)) {
+    try {
+      config = JSON.parse(await readFile(configPath, "utf8"));
+    } catch {
+      // Don't clobber an unparseable config; let the launch surface the
+      // existing "Workspace not trusted" error instead.
+      return;
+    }
+    if (typeof config !== "object" || config === null) {
+      return;
+    }
+  } else {
+    config = {};
+  }
+
+  const projects = (config.projects ??= {}) as Record<string, Record<string, unknown>>;
+  const entry = (projects[cwd] ??= {});
+  if (entry.hasTrustDialogAccepted === true) {
+    return;
+  }
+
+  entry.hasTrustDialogAccepted = true;
+  await writeFile(configPath, JSON.stringify(config, null, 2));
+}
+
 // Locate a binary across PATH and a few common locations.
 const binCache = new Map<string, string | null>();
 
@@ -254,6 +292,8 @@ export async function startRemoteControl(options: {
   if (!PERMISSION_MODES.includes(options.permissionMode)) {
     throw new Error("Invalid permission mode.");
   }
+
+  await ensureWorkspaceTrusted(options.cwd);
 
   const id = `rc_${randomUUID()}`;
   await mkdir(logsDir(), { recursive: true });
