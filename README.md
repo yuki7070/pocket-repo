@@ -34,8 +34,9 @@ npx pocket-repo
 - **PDF preview** — `.pdf` files render inline in a viewer, with a button to
   open them in a new tab. No extra tooling required.
 - **Office document preview** *(optional)* — presentations (`.pptx` / `.ppt` /
-  `.odp`) and documents (`.docx` / `.doc` / `.odt` / `.rtf`) are previewed as
-  PDF when [LibreOffice](https://www.libreoffice.org/) is installed (e.g.
+  `.odp`), documents (`.docx` / `.doc` / `.odt` / `.rtf`), and spreadsheets
+  (`.xlsx` / `.xls` / `.ods`) are previewed as PDF when
+  [LibreOffice](https://www.libreoffice.org/) is installed (e.g.
   `sudo apt install libreoffice`). Conversions are cached; the original file is
   never modified.
 - **Status & branch diff** — see uncommitted working-tree changes, or compare
