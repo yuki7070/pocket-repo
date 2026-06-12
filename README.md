@@ -84,6 +84,19 @@ npx pocket-repo --help
 > devices on your network. Find your machine's IP with `ipconfig getifaddr en0`
 > (macOS) or `hostname -I` (Linux).
 
+### Install as an app (PWA)
+
+Pocket Repo is a Progressive Web App, so you can install it to your home screen
+or desktop (its own window, app icon, no browser chrome).
+
+- **Desktop / localhost** — open it in Chrome/Edge and use the install icon in
+  the address bar.
+- **Phone** — installing requires a **secure context**, so a plain
+  `http://<lan-ip>:4545` address won't offer install. Reach it over HTTPS — for
+  example via a tunnel (`cloudflared`, `ngrok`) or a reverse proxy with TLS —
+  then use "Add to Home Screen". The app itself works fine over plain HTTP; only
+  the install prompt needs HTTPS.
+
 ## Run from source
 
 To hack on Pocket Repo, clone the repo and use [pnpm](https://pnpm.io/):
