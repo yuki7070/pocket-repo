@@ -644,7 +644,14 @@ app.get("/render/:repositoryId/:filePath{.+}", async (c) => {
     const headers: Record<string, string> = {
       "Content-Type": contentType,
       "Cache-Control": "private, no-store",
-      "X-Content-Type-Options": "nosniff"
+      "X-Content-Type-Options": "nosniff",
+      // The HTML document runs in an opaque origin (sandbox CSP below, no
+      // allow-same-origin), so it fetches its own assets — ES modules, fonts,
+      // crossorigin stylesheets — as cross-origin requests (Origin: null).
+      // Allow them: these are anonymous (non-credentialed) fetches of files we
+      // already serve to this same user, so `*` exposes nothing extra. Without
+      // it, module-based builds (e.g. Vite output) fail to load and render blank.
+      "Access-Control-Allow-Origin": "*"
     };
 
     if (isHtmlPath(relativePath)) {
