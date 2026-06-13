@@ -606,11 +606,39 @@ app.get("/repositories/:repositoryId/raw", async (c) => {
   }
 });
 
+// Opt-in flag: render previews in a same-origin context instead of an opaque
+// one. See previewSandboxCsp below for the trade-off.
+function sameOriginPreviewEnabled() {
+  return process.env.POCKET_REPO_ALLOW_SAME_ORIGIN_PREVIEW === "1";
+}
+
+// Sandbox tokens for rendered HTML/slides. By default no allow-same-origin, so
+// the document runs in an opaque origin — scripts execute but the page cannot
+// reach Pocket Repo's own API, cookies, or storage. That isolation is the whole
+// point of the sandbox, but it also means the preview fetches its own assets
+// (ES modules, fonts, crossorigin CSS) credential-less and cross-origin, which
+// an auth proxy like Cloudflare Access blocks. Setting
+// POCKET_REPO_ALLOW_SAME_ORIGIN_PREVIEW=1 (CLI: --allow-same-origin-preview)
+// adds allow-same-origin so previews are first-party (assets carry credentials
+// and pass the proxy) — at the cost of letting previewed scripts run with full
+// same-origin access to this app. Only enable on a trusted, access-controlled
+// instance where you trust the repos you browse.
+const PREVIEW_SANDBOX_TOKENS =
+  "allow-scripts allow-popups allow-forms allow-modals allow-downloads";
+
+function previewSandboxCsp() {
+  const tokens = sameOriginPreviewEnabled()
+    ? `allow-same-origin ${PREVIEW_SANDBOX_TOKENS}`
+    : PREVIEW_SANDBOX_TOKENS;
+  return `sandbox ${tokens}`;
+}
+
 // Render an HTML file (and its sibling assets) in the browser. Uses a
 // path-style route so relative URLs inside the HTML (./style.css, img/foo.png)
 // resolve naturally to /render/<id>/<dir>/<asset>. The HTML document is served
 // with a sandbox CSP so it runs in an opaque origin: scripts execute but the
-// page cannot reach Pocket Repo's same-origin API, cookies, or storage.
+// page cannot reach Pocket Repo's same-origin API, cookies, or storage (unless
+// same-origin preview is opted into; see previewSandboxCsp).
 app.get("/render/:repositoryId/:filePath{.+}", async (c) => {
   const repository = await getRecentRepository(c.req.param("repositoryId"));
 
@@ -655,8 +683,7 @@ app.get("/render/:repositoryId/:filePath{.+}", async (c) => {
     };
 
     if (isHtmlPath(relativePath)) {
-      headers["Content-Security-Policy"] =
-        "sandbox allow-scripts allow-popups allow-forms allow-modals allow-downloads";
+      headers["Content-Security-Policy"] = previewSandboxCsp();
     }
 
     return c.body(body, 200, headers);
@@ -714,8 +741,7 @@ app.get("/render-marp/:repositoryId/:filePath{.+}", async (c) => {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
-      "Content-Security-Policy":
-        "sandbox allow-scripts allow-popups allow-forms allow-modals allow-downloads"
+      "Content-Security-Policy": previewSandboxCsp()
     });
   } catch (error) {
     const message =
@@ -742,7 +768,11 @@ app.get("/capabilities", async (c) => {
     isOfficeAvailable(),
     isClaudeAvailable()
   ]);
-  return c.json({ office, remoteControl });
+  return c.json({
+    office,
+    remoteControl,
+    sameOriginPreview: sameOriginPreviewEnabled()
+  });
 });
 
 // List running `claude remote-control` servers Pocket Repo has launched.

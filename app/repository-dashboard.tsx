@@ -2370,6 +2370,49 @@ function MarkdownView({
   );
 }
 
+// Base sandbox tokens for rendered preview iframes. allow-same-origin is added
+// only when the server opts into same-origin previews (see previewSandboxCsp on
+// the backend) — both layers must agree, since the effective sandbox is the
+// intersection of this attribute and the document's own CSP sandbox.
+const PREVIEW_IFRAME_SANDBOX =
+  "allow-scripts allow-popups allow-forms allow-modals allow-downloads";
+
+// Cached across components so each preview doesn't re-fetch /api/capabilities.
+let sameOriginPreviewCache: boolean | null = null;
+
+function useSameOriginPreview() {
+  const [enabled, setEnabled] = useState(sameOriginPreviewCache ?? false);
+
+  useEffect(() => {
+    if (sameOriginPreviewCache !== null) {
+      return;
+    }
+    let active = true;
+    fetch("/api/capabilities")
+      .then((response) => response.json())
+      .then((data: { sameOriginPreview?: boolean }) => {
+        sameOriginPreviewCache = Boolean(data?.sameOriginPreview);
+        if (active) {
+          setEnabled(sameOriginPreviewCache);
+        }
+      })
+      .catch(() => {
+        // Capabilities are optional; fall back to the locked-down sandbox.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return enabled;
+}
+
+function previewIframeSandbox(sameOrigin: boolean) {
+  return sameOrigin
+    ? `allow-same-origin ${PREVIEW_IFRAME_SANDBOX}`
+    : PREVIEW_IFRAME_SANDBOX;
+}
+
 function HtmlPreview({
   file,
   renderUrl
@@ -2378,6 +2421,7 @@ function HtmlPreview({
   renderUrl: string;
 }) {
   const [view, setView] = useState<"preview" | "code">("preview");
+  const sameOriginPreview = useSameOriginPreview();
 
   return (
     <div className="flex flex-col gap-3">
@@ -2422,7 +2466,7 @@ function HtmlPreview({
         <iframe
           src={renderUrl}
           title={file.name}
-          sandbox="allow-scripts allow-popups allow-forms allow-modals allow-downloads"
+          sandbox={previewIframeSandbox(sameOriginPreview)}
           className="h-[70vh] w-full rounded-md border border-border bg-white"
         />
       ) : (
@@ -2448,6 +2492,7 @@ function MarpPreview({
   onOpenFile: (filePath: string) => void;
 }) {
   const [view, setView] = useState<"slides" | "markdown" | "code">("slides");
+  const sameOriginPreview = useSameOriginPreview();
   const baseDir = file.path.includes("/")
     ? file.path.slice(0, file.path.lastIndexOf("/"))
     : "";
@@ -2492,7 +2537,7 @@ function MarpPreview({
           src={slidesUrl}
           title={file.name}
           allow="fullscreen"
-          sandbox="allow-scripts allow-popups allow-forms allow-modals allow-downloads"
+          sandbox={previewIframeSandbox(sameOriginPreview)}
           className="h-[70vh] w-full rounded-md border border-border bg-[#1a1a1a]"
         />
       ) : view === "markdown" ? (
