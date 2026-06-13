@@ -21,10 +21,20 @@ Usage:
 Options:
   -p, --port <port>   Port to listen on (default: 4545, or $PORT)
   -H, --host <host>   Host to bind to (default: 0.0.0.0, or $HOSTNAME)
+  --allow-same-origin-preview
+                      Render HTML/slide previews in a same-origin context so
+                      they load correctly behind an auth proxy (e.g. Cloudflare
+                      Access). UNSAFE: previewed scripts then run with full
+                      access to Pocket Repo's API. Only use on a trusted,
+                      access-controlled instance with repos you trust.
   -h, --help          Show this help
 
 Then open http://<your-machine-ip>:<port> from any device on your network.`);
   process.exit(0);
+}
+
+function hasFlag(name) {
+  return args.some((arg) => arg === name);
 }
 
 function readOption(names) {
@@ -44,6 +54,9 @@ function readOption(names) {
 
 const port = readOption(["--port", "-p"]) ?? process.env.PORT ?? "4545";
 const host = readOption(["--host", "-H"]) ?? process.env.HOSTNAME ?? "0.0.0.0";
+const allowSameOriginPreview =
+  hasFlag("--allow-same-origin-preview") ||
+  process.env.POCKET_REPO_ALLOW_SAME_ORIGIN_PREVIEW === "1";
 
 if (!existsSync(serverPath)) {
   console.error(
@@ -54,7 +67,12 @@ if (!existsSync(serverPath)) {
 
 const child = spawn(process.execPath, [serverPath], {
   cwd: path.dirname(serverPath),
-  env: { ...process.env, PORT: String(port), HOSTNAME: String(host) },
+  env: {
+    ...process.env,
+    PORT: String(port),
+    HOSTNAME: String(host),
+    POCKET_REPO_ALLOW_SAME_ORIGIN_PREVIEW: allowSameOriginPreview ? "1" : ""
+  },
   stdio: "inherit"
 });
 

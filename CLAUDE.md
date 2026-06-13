@@ -12,6 +12,8 @@ Hard invariant: **never edit files or mutate Git state.** Everything is reads vi
 
 As part of that launch, `ensureWorkspaceTrusted(cwd)` writes one config file — `~/.claude.json` (honoring `CLAUDE_CONFIG_DIR`) — to set `projects[cwd].hasTrustDialogAccepted = true`, otherwise `claude remote-control` refuses to start with "Workspace not trusted". This is a careful read-modify-write that bails if the config is unparseable. It is the only place outside the remote-control launch that touches a file on disk; keep it scoped to that path.
 
+**Preview sandbox.** HTML/slide previews (`/render`, `/render-marp`) are served with a `sandbox` CSP, and the client iframes carry a matching `sandbox` attribute (effective sandbox = the intersection). By default neither grants `allow-same-origin`, so previewed repo content runs in an **opaque origin** and cannot reach Pocket Repo's API, cookies, or storage — this isolation is what makes it safe to preview arbitrary repo files. The opt-in flag `--allow-same-origin-preview` (env `POCKET_REPO_ALLOW_SAME_ORIGIN_PREVIEW=1`) adds `allow-same-origin` to both layers so previews are first-party and load behind an auth proxy (e.g. Cloudflare Access), **at the cost of letting previewed scripts call this app's API with the user's credentials** (including `POST .../remote-control`). It is off by default and only safe on a trusted, access-controlled instance. The server gates the CSP via `previewSandboxCsp`; the client matches it by reading `sameOriginPreview` from `/capabilities`. Keep the two in sync if you touch either.
+
 ## Commands
 
 ```bash
