@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { Hono } from "hono";
 import { handle } from "hono/vercel";
 import {
@@ -17,6 +17,7 @@ import {
   getStatusEntries,
   getWorktreeContext,
   listBranches,
+  listFilesForDownload,
   listWorktrees,
   searchFileNames
 } from "@/lib/git";
@@ -26,11 +27,14 @@ import { listHomeDirectories } from "@/lib/home-directories";
 import {
   isHtmlPath,
   listDirectory,
+  readFileForDownload,
+  readFilesForZip,
   readRepositoryFile,
   readRepositoryImage,
   readRepositoryRaw,
   resolveRepositoryPath
 } from "@/lib/repository-files";
+import { createZipArchive } from "@/lib/zip";
 import { renderMarpDeck } from "@/lib/marp";
 import {
   convertOfficeToPdf,
@@ -598,6 +602,107 @@ app.get("/repositories/:repositoryId/raw", async (c) => {
           code: message.includes("outside")
             ? "PATH_OUTSIDE_REPOSITORY"
             : "FILE_NOT_FOUND",
+          message
+        }
+      },
+      400
+    );
+  }
+});
+
+// Build a Content-Disposition attachment header. Falls back to an ASCII-safe
+// name and adds an RFC 5987 filename* so non-ASCII names survive too.
+function attachmentDisposition(fileName: string) {
+  const asciiName = fileName.replace(/["\\\r\n]/g, "_").replace(/[^\x20-\x7e]/g, "_");
+  const encoded = encodeURIComponent(fileName).replace(/['()*]/g, escape);
+  return `attachment; filename="${asciiName}"; filename*=UTF-8''${encoded}`;
+}
+
+function toArrayBuffer(buffer: Buffer) {
+  return buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength
+  ) as ArrayBuffer;
+}
+
+// Download a file (raw bytes) or a directory (zipped). Directories — including
+// the repo root (empty path) — are bundled with the same visibility rules as
+// the browser: `.git` and gitignored files are excluded. Read-only: nothing on
+// disk is modified.
+app.get("/repositories/:repositoryId/download", async (c) => {
+  const repository = await getRecentRepository(c.req.param("repositoryId"));
+
+  if (!repository) {
+    return c.json(
+      {
+        error: {
+          code: "REPOSITORY_NOT_FOUND",
+          message: "Repository not found."
+        }
+      },
+      404
+    );
+  }
+
+  try {
+    const relativePath = c.req.query("path") ?? "";
+    const effectivePath = await resolveWorktreePath(
+      repository,
+      c.req.query("worktree")
+    );
+    const absolutePath = resolveRepositoryPath(effectivePath, relativePath);
+    const stats = await lstat(absolutePath);
+
+    if (stats.isFile()) {
+      const { buffer, fileName } = await readFileForDownload(
+        effectivePath,
+        relativePath
+      );
+
+      return c.body(toArrayBuffer(buffer), 200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": attachmentDisposition(fileName),
+        "Content-Length": String(buffer.length),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff"
+      });
+    }
+
+    if (!stats.isDirectory()) {
+      throw new Error("Path is not a file or directory.");
+    }
+
+    const baseName = relativePath
+      ? path.basename(relativePath.replace(/\/+$/, ""))
+      : repository.name || "repository";
+    const filePaths = await listFilesForDownload(effectivePath, relativePath);
+    const entries = await readFilesForZip(
+      effectivePath,
+      filePaths,
+      baseName,
+      relativePath
+    );
+    const archive = createZipArchive(entries);
+
+    return c.body(toArrayBuffer(archive), 200, {
+      "Content-Type": "application/zip",
+      "Content-Disposition": attachmentDisposition(`${baseName}.zip`),
+      "Content-Length": String(archive.length),
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff"
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to download.";
+
+    return c.json(
+      {
+        error: {
+          code: message.includes("outside")
+            ? "PATH_OUTSIDE_REPOSITORY"
+            : message.includes("too large")
+              ? "DOWNLOAD_TOO_LARGE"
+              : "FILE_NOT_FOUND",
           message
         }
       },

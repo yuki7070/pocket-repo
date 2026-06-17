@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Code2,
   Copy,
+  Download,
   Eye,
   EyeOff,
   ExternalLink,
@@ -1268,6 +1269,18 @@ function RepositoryView({
     return `/api/repositories/${repositoryId}/raw?${params}`;
   }
 
+  function buildDownloadUrl(filePath: string) {
+    const params = new URLSearchParams();
+    if (filePath) {
+      params.set("path", filePath);
+    }
+    if (worktreeParam) {
+      params.set("worktree", worktreeParam);
+    }
+    const query = params.toString();
+    return `/api/repositories/${repositoryId}/download${query ? `?${query}` : ""}`;
+  }
+
   function buildPathUrl(base: string, filePath: string) {
     const encodedPath = filePath
       .split("/")
@@ -1323,7 +1336,12 @@ function RepositoryView({
             {selectedRepository?.path ?? "Open a local project to begin."}
           </p>
           {selectedRepository ? (
-            <PathActionsMenu absolutePath={activeWorktreePath} className="-my-1" />
+            <PathActionsMenu
+              absolutePath={activeWorktreePath}
+              downloadUrl={buildDownloadUrl("")}
+              isDirectory
+              className="-my-1"
+            />
           ) : null}
         </div>
       </section>
@@ -1491,6 +1509,7 @@ function RepositoryView({
                 <PathActionsMenu
                   relativePath={selectedFilePath}
                   absolutePath={toAbsolutePath(selectedFilePath)}
+                  downloadUrl={buildDownloadUrl(selectedFilePath)}
                   className={selectedFile ? "" : "ml-auto"}
                 />
               </div>
@@ -1589,6 +1608,8 @@ function RepositoryView({
                         <PathActionsMenu
                           relativePath={entry.path}
                           absolutePath={toAbsolutePath(entry.path)}
+                          downloadUrl={buildDownloadUrl(entry.path)}
+                          isDirectory={entry.type === "directory"}
                         />
                       </div>
                     );
@@ -2201,17 +2222,22 @@ async function copyText(value: string) {
   }
 }
 
-// A kebab (⋮) menu offering "copy relative path" / "copy absolute path".
-// Relative is the repo-relative path; absolute is the on-disk path. The
-// relative item is omitted when there is no relative portion (e.g. the repo
-// root). A brief toast confirms the copy.
+// A kebab (⋮) menu offering "download" plus "copy relative path" /
+// "copy absolute path". Relative is the repo-relative path; absolute is the
+// on-disk path. The relative item is omitted when there is no relative portion
+// (e.g. the repo root). When a downloadUrl is given, a download item is shown —
+// labelled "Download as ZIP" for directories. A brief toast confirms a copy.
 function PathActionsMenu({
   relativePath,
   absolutePath,
+  downloadUrl,
+  isDirectory,
   className
 }: {
   relativePath?: string;
   absolutePath: string;
+  downloadUrl?: string;
+  isDirectory?: boolean;
   className?: string;
 }) {
   const [toast, setToast] = useState<string | null>(null);
@@ -2221,6 +2247,19 @@ function PathActionsMenu({
       setToast(`Copied ${kind} path`);
       window.setTimeout(() => setToast(null), 1500);
     }
+  }
+
+  function download() {
+    if (!downloadUrl) {
+      return;
+    }
+    const anchor = document.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.rel = "noopener";
+    anchor.download = "";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
   }
 
   return (
@@ -2237,6 +2276,12 @@ function PathActionsMenu({
           <MoreVertical size={16} />
         </DropdownMenuTrigger>
         <DropdownMenuContent>
+          {downloadUrl ? (
+            <DropdownMenuItem onClick={download}>
+              <Download size={14} />
+              {isDirectory ? "Download as ZIP" : "Download"}
+            </DropdownMenuItem>
+          ) : null}
           {relativePath ? (
             <DropdownMenuItem onClick={() => copy(relativePath, "relative")}>
               <Copy size={14} />
