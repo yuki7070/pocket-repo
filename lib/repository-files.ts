@@ -104,6 +104,85 @@ export async function readRepositoryImage(
   return { buffer, contentType, size: stats.size };
 }
 
+// Total uncompressed size allowed for a folder download. Folders are zipped in
+// memory, so this bounds how much we buffer at once.
+const DOWNLOAD_ZIP_LIMIT = 200 * 1024 * 1024;
+
+export type DownloadFile = {
+  buffer: Buffer;
+  fileName: string;
+};
+
+// Read a single file's raw bytes for download. Unlike readRepositoryImage this
+// places no restriction on the file type — any file in the repo can be saved.
+export async function readFileForDownload(
+  repositoryPath: string,
+  relativePath: string
+): Promise<DownloadFile> {
+  const absolutePath = resolveRepositoryPath(repositoryPath, relativePath);
+  const stats = await lstat(absolutePath);
+
+  if (!stats.isFile()) {
+    throw new Error("Path is not a file.");
+  }
+
+  if (stats.size > DOWNLOAD_ZIP_LIMIT) {
+    throw new Error("File is too large to download.");
+  }
+
+  const buffer = await readFile(absolutePath);
+
+  return { buffer, fileName: path.basename(absolutePath) };
+}
+
+// Read the given repo-relative files into ZIP entries rooted under `baseName`,
+// so the archive extracts into a single folder (e.g. `src/` for a `src`
+// download). Files that vanished between listing and reading are skipped, and
+// the running total is capped to bound memory use.
+export async function readFilesForZip(
+  repositoryPath: string,
+  filePaths: string[],
+  baseName: string,
+  basePrefix: string
+) {
+  const prefix = basePrefix.replace(/^\/+|\/+$/g, "");
+  const entries: { name: string; data: Buffer }[] = [];
+  let total = 0;
+
+  for (const filePath of filePaths) {
+    const absolutePath = resolveRepositoryPath(repositoryPath, filePath);
+
+    let buffer: Buffer;
+    try {
+      const stats = await lstat(absolutePath);
+      if (!stats.isFile()) {
+        continue;
+      }
+      total += stats.size;
+      if (total > DOWNLOAD_ZIP_LIMIT) {
+        throw new Error("Folder is too large to download.");
+      }
+      buffer = await readFile(absolutePath);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("too large")) {
+        throw error;
+      }
+      // Tracked-but-deleted or unreadable files are simply omitted.
+      continue;
+    }
+
+    const relativeToBase = prefix
+      ? filePath.slice(prefix.length).replace(/^\/+/, "")
+      : filePath;
+    entries.push({
+      name: `${baseName}/${relativeToBase}`,
+      data: buffer
+    });
+  }
+
+  return entries;
+}
+
 export type FileEntry = {
   name: string;
   path: string;

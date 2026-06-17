@@ -301,6 +301,41 @@ export async function searchFileNames(
     .slice(0, limit);
 }
 
+// List the files under `relativePath` to include in a folder download: tracked
+// files plus untracked-but-not-ignored ones, with `.git` and gitignored entries
+// excluded (the same rules the file browser shows by default). Paths are
+// repo-relative. Non-Git projects fall back to a bounded filesystem walk.
+export async function listFilesForDownload(
+  repositoryPath: string,
+  relativePath: string
+) {
+  const prefix = relativePath.replace(/^\/+|\/+$/g, "");
+
+  if (!(await isGitRepository(repositoryPath))) {
+    const files = await walkProjectFiles(repositoryPath);
+    return prefix
+      ? files.filter(
+          (file) => file === prefix || file.startsWith(`${prefix}/`)
+        )
+      : files;
+  }
+
+  const args = ["ls-files", "-z", "--cached", "--others", "--exclude-standard"];
+  if (prefix) {
+    args.push("--", prefix);
+  }
+  const output = await git(repositoryPath, args);
+
+  return Array.from(
+    new Set(
+      output
+        .split("\0")
+        .map((file) => file.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 // Directories skipped when walking a non-Git project (no .gitignore to rely on).
 const WALK_SKIP_DIRS = new Set([
   ".git",
