@@ -29,6 +29,7 @@ import {
   Loader2,
   Menu,
   MoreVertical,
+  RefreshCw,
   Search,
   Settings,
   Smartphone,
@@ -174,6 +175,9 @@ export function RepositoryDashboard() {
   const [readmeFile, setReadmeFile] = useState<FileContent | null>(null);
   const [isFilesLoading, setIsFilesLoading] = useState(false);
   const [fileErrorMessage, setFileErrorMessage] = useState<string | null>(null);
+  // Bumped by the in-app refresh button to re-run the file/directory fetches
+  // without a full browser reload.
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const [directoryListing, setDirectoryListing] =
     useState<DirectoryListing | null>(null);
   const [isDirectoryLoading, setIsDirectoryLoading] = useState(false);
@@ -422,7 +426,7 @@ export function RepositoryDashboard() {
     return () => {
       mounted = false;
     };
-  }, [selectedRepository, currentPath, worktreeParam, showHidden]);
+  }, [selectedRepository, currentPath, worktreeParam, showHidden, refreshNonce]);
 
   useEffect(() => {
     if (!selectedRepository || !selectedFilePath) {
@@ -477,7 +481,7 @@ export function RepositoryDashboard() {
     return () => {
       mounted = false;
     };
-  }, [selectedRepository, selectedFilePath, worktreeParam]);
+  }, [selectedRepository, selectedFilePath, worktreeParam, refreshNonce]);
 
   // GitHub-style: when browsing a directory, render its README below the file
   // list. Only fetch when not viewing a file and a Markdown README is present.
@@ -776,6 +780,7 @@ export function RepositoryDashboard() {
             entries={entries}
             showHidden={showHidden}
             onToggleHidden={() => setShowHidden((value) => !value)}
+            onRefresh={() => setRefreshNonce((value) => value + 1)}
             fileErrorMessage={fileErrorMessage}
             isFilesLoading={isFilesLoading}
             selectedFile={selectedFile}
@@ -1210,12 +1215,41 @@ function DirectoryBrowser({
   );
 }
 
+// In-app refresh control for the file/folder views, so the contents can be
+// re-fetched without a full browser reload. Spins while a fetch is in flight.
+function RefreshButton({
+  onRefresh,
+  busy,
+  className
+}: {
+  onRefresh: () => void;
+  busy: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onRefresh}
+      disabled={busy}
+      title="Refresh"
+      className={cn(
+        "flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60",
+        className
+      )}
+    >
+      <RefreshCw size={14} className={busy ? "animate-spin" : undefined} />
+      <span className="hidden sm:inline">Refresh</span>
+    </button>
+  );
+}
+
 function RepositoryView({
   activeTab,
   currentPath,
   entries,
   showHidden,
   onToggleHidden,
+  onRefresh,
   fileErrorMessage,
   isFilesLoading,
   selectedFile,
@@ -1238,6 +1272,7 @@ function RepositoryView({
   entries: FileEntry[];
   showHidden: boolean;
   onToggleHidden: () => void;
+  onRefresh: () => void;
   fileErrorMessage: string | null;
   isFilesLoading: boolean;
   selectedFile: FileContent | null;
@@ -1513,11 +1548,15 @@ function RepositoryView({
                     {formatBytes(selectedFile.size)}
                   </span>
                 ) : null}
+                <RefreshButton
+                  onRefresh={onRefresh}
+                  busy={isFilesLoading}
+                  className={selectedFile ? "" : "ml-auto"}
+                />
                 <PathActionsMenu
                   relativePath={selectedFilePath}
                   absolutePath={toAbsolutePath(selectedFilePath)}
                   downloadUrl={buildDownloadUrl(selectedFilePath)}
-                  className={selectedFile ? "" : "ml-auto"}
                 />
               </div>
               <div className="p-4">
@@ -1561,6 +1600,7 @@ function RepositoryView({
                     {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
                     <span className="hidden sm:inline">Hidden</span>
                   </button>
+                  <RefreshButton onRefresh={onRefresh} busy={isFilesLoading} />
                   <span>Size</span>
                 </div>
               </div>
