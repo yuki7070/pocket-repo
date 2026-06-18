@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  isValidElement,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { createPortal } from "react-dom";
 import {
   BookOpen,
@@ -2340,6 +2347,57 @@ function resolveRepoRelativePath(baseDir: string, target: string) {
   return segments.join("/");
 }
 
+// Render a ```mermaid fenced block as an SVG diagram. mermaid is heavy (~MBs)
+// and needs the DOM, so it is lazily imported only when a diagram is actually
+// present. securityLevel "strict" keeps any scripts/HTML in the diagram source
+// inert — important since the source is arbitrary repo content. On a render
+// error we fall back to showing the raw source as a code block.
+function MermaidDiagram({ code }: { code: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const reactId = useId();
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const id = `mermaid-${reactId.replace(/[^a-zA-Z0-9]/g, "")}`;
+
+    import("mermaid")
+      .then(async ({ default: mermaid }) => {
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: "dark",
+          securityLevel: "strict"
+        });
+        const { svg } = await mermaid.render(id, code);
+        if (!cancelled && containerRef.current) {
+          containerRef.current.innerHTML = svg;
+          setError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [code, reactId]);
+
+  if (error) {
+    return (
+      <pre>
+        <code>{code}</code>
+      </pre>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className="mermaid-diagram flex justify-center" />
+  );
+}
+
 // Render Markdown with GitHub-flavored extensions and embedded raw HTML
 // (rehype-raw) so README tables/<img> render like on GitHub. Relative image
 // sources and links are resolved against `baseDir` and rewritten to the /raw
@@ -2361,6 +2419,28 @@ function MarkdownView({
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
         components={{
+          pre: ({ children }) => {
+            // A fenced block arrives as <pre><code class="language-xxx">. For
+            // ```mermaid we replace the whole <pre> with a rendered diagram.
+            const child = Array.isArray(children) ? children[0] : children;
+            if (isValidElement(child)) {
+              const childProps = child.props as {
+                className?: string;
+                children?: unknown;
+              };
+              if (
+                childProps.className &&
+                /\blanguage-mermaid\b/.test(childProps.className)
+              ) {
+                const code = String(childProps.children ?? "").replace(
+                  /\n$/,
+                  ""
+                );
+                return <MermaidDiagram code={code} />;
+              }
+            }
+            return <pre>{children}</pre>;
+          },
           img: ({ src, alt }) => {
             const source = typeof src === "string" ? src : "";
             const resolved = resolveRepoRelativePath(baseDir, source);
