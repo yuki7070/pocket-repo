@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, constants, openSync } from "node:fs";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -235,12 +235,33 @@ function isPidAlive(pid: number) {
   }
 }
 
+// Read only the last `limit` bytes of a log file. These logs are written by a
+// long-running `claude remote-control` process that redraws its status line
+// continuously, so they grow without bound (hundreds of MB). Reading the whole
+// file into a string to slice the tail blows the heap — open and read just the
+// tail instead. Bytes ≈ chars here (the logs are ASCII/ANSI), so a byte budget
+// is a fine stand-in for the previous character budget.
 async function tailLog(logFile: string, limit = 4000) {
+  let handle;
   try {
-    const content = await readFile(logFile, "utf8");
-    return content.length > limit ? content.slice(content.length - limit) : content;
+    handle = await open(logFile, "r");
   } catch {
     return "";
+  }
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, Number(size) - limit);
+    const length = Number(size) - start;
+    if (length <= 0) {
+      return "";
+    }
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, start);
+    return buffer.toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    await handle.close();
   }
 }
 
